@@ -14,6 +14,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Newtonsoft.Json;
@@ -31,6 +32,17 @@ public class ActionDisp
     public int Delay { get; set; }
 }
 
+public class LayerDisp
+{
+    public string HexColor { get; set; }
+    public IBrush HexColorBrush { get; set; }
+    public Bitmap Thumbnail { get; set; }
+    public SKBitmap RawBitmap { get; set; }
+    public int PixelCount { get; set; }
+    public string PixelCountText => $"{PixelCount} pixels";
+    public bool Enabled { get; set; } = true;
+}
+
 public partial class MainWindow : Window
 {
     public static MainWindow? CurrentMainWindow;
@@ -43,6 +55,7 @@ public partial class MainWindow : Window
 
     // Automation
     public ObservableCollection<ActionDisp> ActionsContext { get; set; } = new();
+    public ObservableCollection<LayerDisp> LayersContext { get; set; } = new();
     private List<InputAction> _actionStack = new();
     List<SKBitmap> _layersStack = new();
 
@@ -263,6 +276,13 @@ public partial class MainWindow : Window
 
     public void ImportImage(string? path, byte[]? img = null)
     {
+        foreach (var layer in LayersContext)
+        {
+            layer.RawBitmap?.Dispose();
+        }
+        LayersContext.Clear();
+        _layersStack.Clear();
+
         _rawBitmap = img is null ? SKBitmap.Decode(path).NormalizeColor() : SKBitmap.Decode(img).NormalizeColor();
         _preFxBitmap = _rawBitmap.Copy();
         _displayedBitmap = _rawBitmap.NormalizeColor().ConvertToAvaloniaBitmap();
@@ -295,7 +315,19 @@ public partial class MainWindow : Window
 
     private void RunButtonOnClick(object? sender, RoutedEventArgs e)
     {
-        if (_processedBitmap == null)
+        _layersStack.Clear();
+        if (LayersContext != null && LayersContext.Count > 0)
+        {
+            foreach (var layer in LayersContext)
+            {
+                if (layer.Enabled)
+                {
+                    _layersStack.Add(layer.RawBitmap);
+                }
+            }
+        }
+
+        if (_processedBitmap == null && _layersStack.Count == 0)
         {
             new MessageBox().ShowMessageBox("Error!", "Please select and process an image beforehand.", "error");
             return;
@@ -312,8 +344,14 @@ public partial class MainWindow : Window
         if (Drawing.IsDrawing) return;
         Drawing.ChosenAlgorithm = (byte)AlgorithmSelection.SelectedIndex;
 
-        new Preview().ReadyDraw(_processedBitmap);
-        new Preview().ReadyStackDraw(_preFxBitmap, _layersStack, _actionStack);
+        if (_layersStack.Count > 0)
+        {
+            new Preview().ReadyStackDraw(_preFxBitmap, _layersStack, _actionStack);
+        }
+        else
+        {
+            new Preview().ReadyDraw(_processedBitmap);
+        }
         WindowState = WindowState.Minimized;
     }
 
@@ -337,6 +375,13 @@ public partial class MainWindow : Window
 
     private void ImageClearImageOnClick(object? sender, RoutedEventArgs e)
     {
+        foreach (var layer in LayersContext)
+        {
+            layer.RawBitmap?.Dispose();
+        }
+        LayersContext.Clear();
+        _layersStack.Clear();
+
         _rawBitmap = new SKBitmap(318, 318, true);
         _preFxBitmap = new SKBitmap(318, 318, true);
         _processedBitmap = null;
@@ -357,6 +402,13 @@ public partial class MainWindow : Window
 
     private void ResizeImage(double width, double height)
     {
+        foreach (var layer in LayersContext)
+        {
+            layer.RawBitmap?.Dispose();
+        }
+        LayersContext.Clear();
+        _layersStack.Clear();
+
         width = widthLock > 0 ? widthLock : Math.Max(1, width);
         height = heightLock > 0 ? heightLock :  Math.Max(1, height);
 
@@ -752,5 +804,88 @@ public partial class MainWindow : Window
 
             ActionsContext.Add(actionDisp);
         }
+    }
+
+    public void GenerateLayersButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_preFxBitmap == null || _preFxBitmap.Width <= 1 || _preFxBitmap.Height <= 1)
+        {
+            new MessageBox().ShowMessageBox("Error!", "Please import an image first.", "error");
+            return;
+        }
+
+        var matches = Regex.Matches(HexColorsInput.Text ?? "", @"#?([a-fA-F0-9]{6})");
+        var targetColors = new List<SKColor>();
+        var seenColors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in matches)
+        {
+            var hex = match.Groups[1].Value.ToUpper();
+            if (seenColors.Contains(hex)) continue;
+            seenColors.Add(hex);
+            
+            try
+            {
+                byte r = byte.Parse(hex.Substring(0, 2), NumberStyles.HexNumber);
+                byte g = byte.Parse(hex.Substring(2, 2), NumberStyles.HexNumber);
+                byte b = byte.Parse(hex.Substring(4, 2), NumberStyles.HexNumber);
+                targetColors.Add(new SKColor(r, g, b));
+            }
+            catch { }
+        }
+
+        if (targetColors.Count == 0)
+        {
+            new MessageBox().ShowMessageBox("Error!", "Please enter at least one valid hex color.", "error");
+            return;
+        }
+
+        // Split the image
+        var splitResults = ImageProcessing.SplitImageByColors(_preFxBitmap, targetColors, (byte)_alphaThresh);
+
+        foreach (var layer in LayersContext)
+        {
+            layer.RawBitmap?.Dispose();
+        }
+        LayersContext.Clear();
+        _layersStack.Clear();
+
+        foreach (var res in splitResults)
+        {
+            if (res.PixelCount == 0)
+            {
+                // Discard empty layers
+                res.Bitmap.Dispose();
+                continue;
+            }
+
+            var hexStr = $"#{res.Color.Red:X2}{res.Color.Green:X2}{res.Color.Blue:X2}";
+            var color = Color.FromRgb(res.Color.Red, res.Color.Green, res.Color.Blue);
+            var avaloniaBrush = new SolidColorBrush(color);
+            var thumbnail = res.Bitmap.ConvertToAvaloniaBitmap();
+
+            LayersContext.Add(new LayerDisp
+            {
+                HexColor = hexStr,
+                HexColorBrush = avaloniaBrush,
+                Thumbnail = thumbnail,
+                RawBitmap = res.Bitmap,
+                PixelCount = res.PixelCount
+            });
+        }
+
+        if (LayersContext.Count == 0)
+        {
+            new MessageBox().ShowMessageBox("Warning", "No pixels matched the specified hex colors.", "warning");
+        }
+    }
+
+    public void ClearLayersButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        foreach (var layer in LayersContext)
+        {
+            layer.RawBitmap?.Dispose();
+        }
+        LayersContext.Clear();
+        _layersStack.Clear();
     }
 }

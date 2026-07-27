@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -449,4 +449,87 @@ public static class ImageProcessing
         public string Pat = "0 0\n0 0";
         public int Width = 2;
     }
+
+    public static unsafe List<ColorLayerResult> SplitImageByColors(SKBitmap sourceBitmap, List<SKColor> targetColors, byte alphaThreshold)
+    {
+        var width = sourceBitmap.Width;
+        var height = sourceBitmap.Height;
+
+        var results = new List<ColorLayerResult>();
+        var layerPtrs = new uint*[targetColors.Count];
+
+        for (int i = 0; i < targetColors.Count; i++)
+        {
+            var color = targetColors[i];
+            var layerBmp = new SKBitmap(width, height);
+            results.Add(new ColorLayerResult { Bitmap = layerBmp, Color = color, PixelCount = 0 });
+            layerPtrs[i] = (uint*)layerBmp.GetPixels().ToPointer();
+        }
+
+        var basePtr = (uint*)sourceBitmap.GetPixels().ToPointer();
+
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var srcPtr = basePtr + width * y + x;
+                GetPixel(srcPtr, out var r, out var g, out var b, out var a);
+
+                if (a < alphaThreshold)
+                {
+                    for (int i = 0; i < targetColors.Count; i++)
+                    {
+                        *(layerPtrs[i] + width * y + x) = MakePixel(0, 0, 0, 0);
+                    }
+                    continue;
+                }
+
+                // Find the closest target color
+                int closestIndex = 0;
+                double minDistance = double.MaxValue;
+
+                for (int i = 0; i < targetColors.Count; i++)
+                {
+                    var tc = targetColors[i];
+
+                    int dr = r - tc.Red;
+                    int dg = g - tc.Green;
+                    int db = b - tc.Blue;
+                    double dist = dr * dr + dg * dg + db * db;
+
+                    if (dist < minDistance)
+                    {
+                        minDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+
+                // Set the pixel on the closest layer to the target color (fully opaque)
+                // And make it transparent on all other layers
+                for (int i = 0; i < targetColors.Count; i++)
+                {
+                    var destPixelPtr = layerPtrs[i] + width * y + x;
+                    if (i == closestIndex)
+                    {
+                        var tc = targetColors[i];
+                        *destPixelPtr = MakePixel(tc.Red, tc.Green, tc.Blue, 255);
+                        results[i].PixelCount++;
+                    }
+                    else
+                    {
+                        *destPixelPtr = MakePixel(0, 0, 0, 0);
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+}
+
+public class ColorLayerResult
+{
+    public SKBitmap Bitmap { get; set; }
+    public SKColor Color { get; set; }
+    public int PixelCount { get; set; }
 }
