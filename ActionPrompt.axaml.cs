@@ -179,7 +179,10 @@ public partial class ActionPrompt : Window, INotifyPropertyChanged
         };
         var _ActionData = _rawActionData;
         
-        Action = new InputAction(_ActionType, _ActionData);
+        var delay = int.TryParse(Delay, out var parsedDelay) ? parsedDelay : 0;
+        int? speed = int.TryParse(Speed, out var parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : null;
+
+        Action = new InputAction(_ActionType, _ActionData, delay, speed);
 
         Callback(); // Alien Cat: "Hello? Mothership, can you beam me up?"
     }

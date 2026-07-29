@@ -31,7 +31,7 @@ public partial class Preview : Window
     
     private bool drawingStack;
     private List<InputAction> actions = new();
-    private List<SKBitmap> stack = new();
+    private List<ColorLayerResult> stack = new();
 
     public Preview()
     {
@@ -103,7 +103,7 @@ public partial class Preview : Window
         }
     }
 
-    public void ReadyStackDraw(SKBitmap bitmap, List<SKBitmap> _stack, List<InputAction> _actions)
+    public void ReadyStackDraw(SKBitmap bitmap, List<ColorLayerResult> _stack, List<InputAction> _actions)
     {
         drawingStack = true;
         renderedBitmap?.Dispose();

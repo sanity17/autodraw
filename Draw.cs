@@ -38,9 +38,11 @@ public class InputAction
     
     public string? Data { get; set; }
 
-    public InputAction(ActionType action, object? data = null)
+    public InputAction(ActionType action, object? data = null, int delay = 0, int? speed = null)
     {
         Action = action;
+        Delay = Math.Max(0, delay);
+        Speed = speed > 0 ? speed : null;
         switch (action)
         {
             case ActionType.LeftClick:
@@ -60,22 +62,53 @@ public class InputAction
         }
     }
 
-    public void PerformAction()
+    public InputAction(InputAction action)
+        : this(action.Action, action.Data is not null ? action.Data : action.Position, action.Delay, action.Speed)
     {
+    }
+
+    private async Task MoveToPosition()
+    {
+        if (Position is null) return;
+
+        var targetPosition = Position.Value;
+        if (Speed is null)
+        {
+            Input.MoveTo((short)targetPosition.X, (short)targetPosition.Y);
+            return;
+        }
+
+        var currentPosition = Input.mousePos;
+        var steps = Math.Max(1, (int)MathF.Ceiling(Vector2.Distance(currentPosition, targetPosition)));
+
+        for (var i = 1; i <= steps; i++)
+        {
+            var position = Vector2.Lerp(currentPosition, targetPosition, i / (float)steps);
+            Input.MoveTo((short)position.X, (short)position.Y);
+            await Drawing.NOP(Speed.Value);
+        }
+    }
+
+    public async Task PerformAction()
+    {
+        if (Delay > 0)
+        {
+            await Drawing.NOP(Delay * 10_000L);
+        }
+
         switch (Action)
         {
-            //TODO LATER: Add Speed and Delay functions to actions
             case ActionType.MoveTo:
-                Input.MoveTo((short)Position.Value.X, (short)Position.Value.Y);
+                await MoveToPosition();
                 break;
 
             case ActionType.LeftClick:
-                Input.MoveTo((short)Position.Value.X, (short)Position.Value.Y);
+                await MoveToPosition();
                 Input.SendClick(Input.MouseTypes.MouseLeft);
                 break;
 
             case ActionType.RightClick:
-                Input.MoveTo((short)Position.Value.X, (short)Position.Value.Y);
+                await MoveToPosition();
                 Input.SendClick(Input.MouseTypes.MouseRight);
                 break;
 
@@ -535,7 +568,7 @@ public static class Drawing
     }
 
     private static bool StackHalted;
-    public static async Task<bool> DrawStack(List<SKBitmap> stack, List<InputAction> actions, Vector2 position)
+    public static async Task<bool> DrawStack(List<ColorLayerResult> stack, List<InputAction> actions, Vector2 position)
     {
         StackHalted = false;
         static void KeybindRelease(object? sender, KeyboardHookEventArgs e)
@@ -544,18 +577,16 @@ public static class Drawing
         }
         Input.taskHook.KeyReleased += KeybindRelease;
 
-        foreach (SKBitmap bitmap in stack)
+        foreach (ColorLayerResult layer in stack)
         {
-            List<InputAction> actionsCopy = new(actions.Select(act => new InputAction(act.Action, act.Data is not null ? act.Data : act.Position)));
+            List<InputAction> actionsCopy = new(actions.Select(act => new InputAction(act)));
             if (StackHalted)
             {
                 break;
             }
             
             // Pre-Process Actions:
-            Color color = ImageProcessing.GetColor(bitmap);
-            string hex = ColorToHexConverter.ToHexString(color, AlphaComponentPosition.Trailing); // Why yes I AM feeling lazy today! Thanks avalonia for this lol
-            hex = hex.Substring(0, 6);
+            string hex = $"{layer.Color.Red:X2}{layer.Color.Green:X2}{layer.Color.Blue:X2}";
             Console.WriteLine(hex);
             
             foreach (var act in actionsCopy)
@@ -572,7 +603,7 @@ public static class Drawing
             // Use the Actions :D
             foreach (var act in actionsCopy)
             {
-                act.PerformAction();
+                await act.PerformAction();
                 await NOP(1000000);
             }
             
@@ -581,15 +612,25 @@ public static class Drawing
                 break;
             }
             
-            SKBitmap processedBitmap = ImageProcessing.Process(bitmap, ImageProcessing._currentFilters);
+            using SKBitmap processedBitmap = ImageProcessing.ProcessLayerMask(layer.Bitmap, ImageProcessing._currentFilters);
             await NOP(1000000);
-            await Draw(processedBitmap,position);
+            await Draw(processedBitmap, position, false);
+        }
+
+        Input.taskHook.KeyReleased -= KeybindRelease;
+
+        if (ShowPopup && !StackHalted)
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                new MessageBox().ShowMessageBox("Drawing Finished!", "The drawing has finished! Yippee!");
+            });
         }
 
         return true;
     }
 
-    public static async Task<bool> Draw(SKBitmap bitmap,Vector2 position)
+    public static async Task<bool> Draw(SKBitmap bitmap, Vector2 position, bool showFinishedPopup = true)
     {
         if (IsDrawing) return false;
 
@@ -745,7 +786,7 @@ public static class Drawing
         Dispatcher.UIThread.Invoke(() =>
         {
             _dataDisplay.Close();
-            if (ShowPopup) new MessageBox().ShowMessageBox("Drawing Finished!", "The drawing has finished! Yippee!");
+            if (showFinishedPopup && ShowPopup) new MessageBox().ShowMessageBox("Drawing Finished!", "The drawing has finished! Yippee!");
         });
         
         return true;

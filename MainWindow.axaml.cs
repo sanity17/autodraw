@@ -38,6 +38,7 @@ public class LayerDisp
     public IBrush HexColorBrush { get; set; }
     public Bitmap Thumbnail { get; set; }
     public SKBitmap RawBitmap { get; set; }
+    public SKColor Color { get; set; }
     public int PixelCount { get; set; }
     public string PixelCountText => $"{PixelCount} pixels";
     public bool Enabled { get; set; } = true;
@@ -57,7 +58,7 @@ public partial class MainWindow : Window
     public ObservableCollection<ActionDisp> ActionsContext { get; set; } = new();
     public ObservableCollection<LayerDisp> LayersContext { get; set; } = new();
     private List<InputAction> _actionStack = new();
-    List<SKBitmap> _layersStack = new();
+    List<ColorLayerResult> _layersStack = new();
 
     private long _lastMem;
     private long _lastTime = DateTime.Now.ToFileTime();
@@ -322,7 +323,12 @@ public partial class MainWindow : Window
             {
                 if (layer.Enabled)
                 {
-                    _layersStack.Add(layer.RawBitmap);
+                    _layersStack.Add(new ColorLayerResult
+                    {
+                        Bitmap = layer.RawBitmap,
+                        Color = layer.Color,
+                        PixelCount = layer.PixelCount
+                    });
                 }
             }
         }
@@ -869,6 +875,7 @@ public partial class MainWindow : Window
                 HexColorBrush = avaloniaBrush,
                 Thumbnail = thumbnail,
                 RawBitmap = res.Bitmap,
+                Color = res.Color,
                 PixelCount = res.PixelCount
             });
         }

@@ -340,6 +340,46 @@ public static class ImageProcessing
         return outputBitmap;
     }
 
+    public static unsafe SKBitmap ProcessLayerMask(SKBitmap sourceBitmap, Filters filterSettings)
+    {
+        var width = sourceBitmap.Width;
+        var height = sourceBitmap.Height;
+        var maskBitmap = new SKBitmap(width, height);
+        var srcPtr = (uint*)sourceBitmap.GetPixels().ToPointer();
+        var dstPtr = (uint*)maskBitmap.GetPixels().ToPointer();
+
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            GetPixel(srcPtr++, out _, out _, out _, out var alphaByte);
+            *dstPtr++ = alphaByte >= filterSettings.AlphaThreshold
+                ? MakePixel(0, 0, 0, 255)
+                : MakePixel(255, 255, 255, 255);
+        }
+
+        var maskFilters = new Filters
+        {
+            AlphaThreshold = 0,
+            MaxThreshold = 127,
+            MinThreshold = 0,
+            Crosshatch = filterSettings.Crosshatch,
+            DiagCrosshatch = filterSettings.DiagCrosshatch,
+            HorizontalLines = filterSettings.HorizontalLines,
+            VerticalLines = filterSettings.VerticalLines,
+            Invert = false,
+            Outline = filterSettings.Outline,
+            BorderAdvanced = filterSettings.BorderAdvanced,
+            OutlineAdvanced = filterSettings.OutlineAdvanced,
+            InlineAdvanced = filterSettings.InlineAdvanced,
+            InlineBorderAdvanced = filterSettings.InlineBorderAdvanced,
+            ErosionAdvanced = filterSettings.ErosionAdvanced
+        };
+
+        var processedBitmap = Process(maskBitmap, maskFilters);
+        maskBitmap.Dispose();
+        return processedBitmap;
+    }
+
     public static unsafe Color GetColor(SKBitmap sourceBitmap)
     {
         // Assume its Bgra8888
