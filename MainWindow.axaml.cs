@@ -72,6 +72,8 @@ public partial class MainWindow : Window
     private SKBitmap? _rawBitmap = new(318, 318, true);
 
     private Settings? _settings;
+    private readonly List<Vector2> _colorPickerCalibrationPoints = new();
+    private bool _capturingColorPicker;
 
     public int widthLock = 0;
     public int heightLock = 0;
@@ -154,6 +156,7 @@ public partial class MainWindow : Window
         RefreshConfigList(this, null);
 
         Input.Start();
+        Input.taskHook.KeyReleased += ConfigureColorPickerWithF5;
     }
 
     // User Configuration Handles
@@ -193,6 +196,34 @@ public partial class MainWindow : Window
         if (Utils.LogObject != null) Utils.LogObject.Close();
         Input.Stop();
         Drawing.Halt();
+    }
+
+    private void ConfigureColorPickerWithF5(object? sender, KeyboardHookEventArgs e)
+    {
+        if (e.Data.KeyCode != KeyCode.VcF5 || _capturingColorPicker) return;
+
+        _capturingColorPicker = true;
+        _colorPickerCalibrationPoints.Clear();
+        Input.taskHook.MouseClicked += CaptureColorPickerPoint;
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() => WindowState = WindowState.Minimized);
+    }
+
+    private void CaptureColorPickerPoint(object? sender, MouseHookEventArgs e)
+    {
+        if (e.Data.Button != SharpHook.Native.MouseButton.Button1) return;
+        _colorPickerCalibrationPoints.Add(new Vector2(e.Data.X, e.Data.Y));
+        if (_colorPickerCalibrationPoints.Count < 4) return;
+
+        ColorPicker.SaveWheelCalibration(
+            _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
+            _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3]);
+        Input.taskHook.MouseClicked -= CaptureColorPickerPoint;
+        _capturingColorPicker = false;
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
+        {
+            WindowState = WindowState.Normal;
+            new MessageBox().ShowMessageBox("Color picker configured", "Wheel calibration saved. The Set Color Hex action will now select colors using the calibrated wheel.");
+        });
     }
     
     public ImageProcessing.Filters GetSelectFilters() // This has practically become an Update _CurrentFilters if anything, but aight.

@@ -105,6 +105,11 @@ public class InputAction
                 break;
 
             case ActionType.SetColorHex:
+                if (ColorPicker.UsesWheel)
+                {
+                    await ColorPicker.SelectWheelColor(Data ?? string.Empty);
+                    break;
+                }
                 await MoveToPosition();
                 Input.SendClick(Input.MouseTypes.MouseLeft);
                 // Let the target application focus its text field before replacing it.
