@@ -24,6 +24,7 @@ public class InputAction
         LeftClick,
         RightClick,
         MoveTo,
+        SetColorHex,
         WriteString,
         KeyDown,
         KeyUp
@@ -48,6 +49,7 @@ public class InputAction
             case ActionType.LeftClick:
             case ActionType.RightClick:
             case ActionType.MoveTo:
+            case ActionType.SetColorHex:
                 if (data is Vector2 pos)
                 {
                     Position = pos;
@@ -100,6 +102,14 @@ public class InputAction
         {
             case ActionType.MoveTo:
                 await MoveToPosition();
+                break;
+
+            case ActionType.SetColorHex:
+                await MoveToPosition();
+                Input.SendClick(Input.MouseTypes.MouseLeft);
+                // Let the target application focus its text field before replacing it.
+                await Drawing.NOP(500_000);
+                Input.ReplaceFocusedText(Data ?? string.Empty);
                 break;
 
             case ActionType.LeftClick:
@@ -597,6 +607,12 @@ public static class Drawing
                     act.Data = act.Data.Replace("{colorHex}", hex);
                     Console.WriteLine(act.Data);
                     Console.WriteLine(hex);
+                }
+                else if (act.Action == InputAction.ActionType.SetColorHex)
+                {
+                    // A dedicated color action always sends a conventional CSS-style
+                    // hex value, regardless of any text actions in the stack.
+                    act.Data = $"#{hex}";
                 }
             }
             

@@ -799,6 +799,7 @@ public partial class MainWindow : Window
             else if (action.Action == InputAction.ActionType.RightClick) _ActionType = "Right Click";
             else if (action.Action == InputAction.ActionType.WriteString) _ActionType = "Write String";
             else if (action.Action == InputAction.ActionType.MoveTo) _ActionType = "Move to";
+            else if (action.Action == InputAction.ActionType.SetColorHex) _ActionType = "Set color hex";
             
             var _ActionData = action.Data is null ? $" @ x={action.Position.Value.X}, y={action.Position.Value.Y}" : $" - {action.Data}";
             
