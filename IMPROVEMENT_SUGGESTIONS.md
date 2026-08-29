@@ -182,139 +182,390 @@ public class ScreenColorPicker
 - Click anywhere on screen → color added to input box
 - Support multi-pick mode (pick multiple colors in sequence)
 
-#### 2.2 Color Calibration Wizard
-**Feature:** Calibrate colors to match how the target application displays them.
+#### 2.2 Universal Color Wheel Calibration Wizard
 
-**Why Needed:** Different applications may:
-- Use different color spaces (sRGB, Adobe RGB, etc.)
-- Apply gamma correction differently
-- Have color profiles that shift values
-- Compress colors in unexpected ways
+**Feature:** Calibrate to ANY color wheel interface on screen, regardless of the application's color model.
+
+**Why Needed:** Different applications use different color models:
+- **RGB Additive**: Standard monitors, most games (Gartic Phone, Sketchful)
+- **HSV/HSL Cylindrical**: Art tools (Photoshop, Krita, Paint Tool SAI)
+- **CMYK Subtractive**: Print software
+- **LAB Perceptual**: Professional color grading tools
+- **Custom LUTs**: Games with proprietary color systems
+
+A simple RGB picker cannot accurately map colors between different color models without transformation.
 
 **Implementation:**
 ```csharp
 // New class: ColorCalibrator.cs
-public class ColorCalibrationProfile
+public enum ColorWheelType
+{
+    RGB_Additive,       // Standard RGB triangle or sliders
+    HSV_HSL_Cylindrical // Circular hue wheel with saturation/value ring
+    CMYK_Subtractive,   // Print color model
+    LAB_Perceptual,     // CIE LAB color space
+    Custom_LUT          // Application-specific lookup table
+}
+
+public class ColorWheelProfile
 {
     public string ProfileName { get; set; }
     public string TargetApplication { get; set; }
-    public Dictionary<SKColor, SKColor> ColorMapping { get; set; }
-    public float GammaCorrection { get; set; } = 1.0f;
-    public float SaturationShift { get; set; } = 0.0f;
-    public float BrightnessShift { get; set; } = 0.0f;
+    public ColorWheelType DetectedType { get; set; }
+    
+    // Transformation parameters
+    public Matrix3x3 ColorTransformationMatrix { get; set; }
+    public GammaCurve GammaCorrection { get; set; }
+    public WhitePoint WhitePoint { get; set; }
+    
+    // Calibration samples
+    public List<ColorPair> CalibrationPoints { get; set; }
+    
+    // Quality metrics
+    public double AverageDeltaE { get; set; }
+    public double MaxDeltaE { get; set; }
+    public DateTime LastCalibrated { get; set; }
 }
 
 public class ColorCalibrator
 {
-    public static ColorCalibrationProfile CreateCalibrationProfile(
-        string appName,
-        List<(SKColor expected, SKColor actual)> samplePairs)
+    /// <summary>
+    /// Analyzes a screen region to detect color wheel type
+    /// </summary>
+    public static async Task<DetectedWheelInfo> DetectColorWheelAsync(Rectangle screenRegion)
     {
-        // Calculate transformation matrix
-        // Return profile
+        // Capture screen region
+        // Analyze color distribution patterns
+        // Detect circular gradients (Hough transform)
+        // Identify radial vs linear color progression
+        // Return detected wheel type and parameters
     }
     
+    /// <summary>
+    /// Multi-point calibration wizard
+    /// </summary>
+    public static async Task<ColorWheelProfile> CreateCalibrationProfileAsync(
+        string appName,
+        Rectangle wheelRegion,
+        Func<Task<ColorPair>> sampleCollector)
+    {
+        // Guide user through picking 5-9 reference points
+        // Compute optimal transformation matrix using least squares
+        // Validate with cross-validation
+        // Return calibrated profile
+    }
+    
+    /// <summary>
+    /// Apply calibrated transformation to convert source color to target space
+    /// </summary>
     public static SKColor ApplyCalibration(
         SKColor originalColor, 
-        ColorCalibrationProfile profile)
+        ColorWheelProfile profile)
     {
-        // Apply calibrated transformation
-        // Return adjusted color
+        // Convert to profile's working space
+        // Apply transformation matrix
+        // Apply gamma correction
+        // Adjust for white point
+        // Convert back to RGB
+        return calibratedColor;
     }
 }
 ```
 
-**UI Addition - Calibration Wizard Dialog:**
+**UI Addition - Enhanced Calibration Wizard Dialog:**
 ```
-Step 1: Select Target Application
-  [Dropdown of saved profiles] [New Profile]
+╔══════════════════════════════════════════════════════════╗
+║  Universal Color Wheel Calibration Wizard                ║
+╠══════════════════════════════════════════════════════════╣
+║                                                          ║
+║  Step 1: Select Target Application                       ║
+║  ┌──────────────────────────────────────────────────┐   ║
+║  │ [Dropdown: Auto-detect running apps]             │   ║
+║  │ Chrome - Gartic Phone                            │   ║
+║  │ Photoshop 2024                                   │   ║
+║  │ + Add New Profile                                │   ║
+║  └──────────────────────────────────────────────────┘   ║
+║                                                          ║
+║  Step 2: Locate Color Wheel                              ║
+║  ┌──────────────────────────────────────────────────┐   ║
+║  │ ☑ Auto-Detect Color Wheel                        │   ║
+║  │ [Preview screenshot with detected wheel outlined]│   ║
+║  │                                                  │   ║
+║  │ If auto-detect fails:                            │   ║
+║  │ [🎯 Manually Select Area] ← Click & drag         │   ║
+║  └──────────────────────────────────────────────────┘   ║
+║                                                          ║
+║  Detected: HSV Cylindrical Wheel (98% confidence)        ║
+║  Center: (1245, 678)  Radius: 120px                      ║
+║                                                          ║
+║  Step 3: Collect Reference Points (5-9 recommended)      ║
+║  ┌──────────────────────────────────────────────────┐   ║
+║  │ Sample 1:                                        │   ║
+║  │ Expected: [■ Pure Red #FF0000] [Pick from wheel] │   ║
+║  │ Actual:   [■ #FE1205] [Auto-capture]             │   ║
+║  │ Delta-E: 1.8 ✓                                    │   ║
+║  │                                                  │   ║
+║  │ Sample 2:                                        │   ║
+║  │ Expected: [■ Pure Green #00FF00] [Pick]          │   ║
+║  │ Actual:   [■ #08F512] [Auto]                     │   ║
+║  │ Delta-E: 2.1 ✓                                    │   ║
+║  │                                                  │   ║
+║  │ [+ Add Manual Sample]                            │   ║
+║  │ [Auto-Sample 9 Points]                           │   ║
+║  └──────────────────────────────────────────────────┘   ║
+║                                                          ║
+║  Step 4: Quality Assessment                              ║
+║  ┌──────────────────────────────────────────────────┐   ║
+║  │ Average Delta-E: 1.9 (Excellent: <2.0)           │   ║
+║  │ Max Delta-E: 3.2 (Acceptable: <4.0)              │   ║
+║  │ R² Fit: 0.997                                     │   ║
+║  │                                                  │   ║
+║  │ Preview Test Colors:                             │   ║
+║  │ Original → Calibrated → Target                   │   ║
+║  │ [■] [#FF8800] → [■] [#FF8010] → [■] [#FF8010]   │   ║
+║  └──────────────────────────────────────────────────┘   ║
+║                                                          ║
+║  [Save Profile] [Re-Calibrate] [Cancel]                  ║
+╚══════════════════════════════════════════════════════════╝
+```
 
-Step 2: Sample Collection
-  "Click 'Pick Expected' then click the color in your reference image"
-  "Click 'Pick Actual' then click the same color in the target application"
-  
-  Expected Color: [■ #FF5500] [Pick]
-  Actual Color:   [■ #FF4A00] [Pick]
-  
-  [+ Add Sample] (collect 3-5 samples minimum)
-  
-Step 3: Review & Save
-  Preview: Original → Calibrated
-  [Save Profile] [Cancel]
-```
+**Advanced Calibration Features:**
+
+1. **Automatic Reference Point Selection**
+   - System suggests optimal sampling points (primary/secondary colors, grays)
+   - Uses color theory to maximize transformation accuracy
+   - Avoids problematic colors (near-black, near-white, highly saturated)
+
+2. **Color Space Transformation Engine**
+   ```csharp
+   public class ColorSpaceConverter
+   {
+       // RGB ↔ HSV/HSL
+       public static HSLColor RGBtoHSL(SKColor rgb);
+       public static SKColor HSLtoRGB(HSLColor hsl);
+       
+       // RGB ↔ LAB (CIE 1976)
+       public static LABColor RGBtoLAB(SKColor rgb, WhitePoint wp);
+       public static SKColor LABtoRGB(LABColor lab, WhitePoint wp);
+       
+       // Gamut mapping
+       public static SKColor MapToGamut(SKColor color, ColorGamut target);
+   }
+   ```
+
+3. **Delta-E Color Difference Metrics**
+   ```csharp
+   public class ColorDifference
+   {
+       // CIE76 (simple Euclidean in LAB space)
+       public static double DeltaE76(LABColor a, LABColor b);
+       
+       // CIE94 (accounts for perceptual non-uniformity)
+       public static double DeltaE94(LABColor a, LABColor b);
+       
+       // CIEDE2000 (most accurate, industry standard)
+       public static double DeltaE2000(LABColor a, LABColor b);
+   }
+   ```
+
+4. **Dynamic Recalibration**
+   - Periodically re-sample known reference points
+   - Detect display drift or lighting changes
+   - Auto-adjust profile if Delta-E exceeds threshold
+
+5. **Multi-Monitor & HDR Support**
+   - Handle different color profiles per display
+   - Tone-map HDR colors to SDR drawing space
+   - Account for monitor calibration differences
 
 #### 2.3 Application-Specific Profiles
-**Feature:** Save and load color profiles for different applications.
+
+**Feature:** Save and load color profiles for different applications, automatically detected by window title or executable hash.
 
 **Implementation:**
 ```csharp
-// Store in user config directory
-// Format: JSON
+// Store in user config directory: %APPDATA%/AutoDraw/ColorProfiles.json
+// Format: JSON with full transformation data
 {
   "profiles": [
     {
-      "name": "Gartic Phone",
-      "targetApp": "Chrome-GarticPhone",
-      "gammaCorrection": 1.05,
-      "colorSamples": [...]
+      "profileId": "a7f3b2c1-4d5e-6f7g-8h9i-0j1k2l3m4n5o",
+      "name": "Gartic Phone (Chrome)",
+      "targetApp": {
+        "executableHash": "chrome.exe-abc123",
+        "windowTitlePattern": "Gartic Phone.*",
+        "processName": "chrome"
+      },
+      "detectedWheelType": "RGB_Additive",
+      "transformationMatrix": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+      "gammaCorrection": {"red": 1.05, "green": 1.05, "blue": 1.05},
+      "whitePoint": {"x": 0.3127, "y": 0.3290, "name": "D65"},
+      "calibrationPoints": [
+        {"expected": {"r": 255, "g": 0, "b": 0}, "actual": {"r": 254, "g": 18, "b": 5}},
+        {"expected": {"r": 0, "g": 255, "b": 0}, "actual": {"r": 8, "g": 245, "b": 18}}
+      ],
+      "qualityMetrics": {
+        "averageDeltaE": 1.9,
+        "maxDeltaE": 3.2,
+        "rSquared": 0.997
+      },
+      "lastCalibrated": "2025-01-15T14:30:00Z",
+      "createdDate": "2025-01-10T09:15:00Z"
     },
     {
-      "name": "Sketchful.io",
-      "targetApp": "Chrome-Sketchful",
-      "gammaCorrection": 0.98,
-      "colorSamples": [...]
+      "profileId": "b8g4c3d2-5e6f-7g8h-9i0j-1k2l3m4n5o6p",
+      "name": "Photoshop 2024 - Adobe RGB",
+      "targetApp": {
+        "executableHash": "photoshop.exe-def456",
+        "windowTitlePattern": "Adobe Photoshop.*",
+        "processName": "photoshop"
+      },
+      "detectedWheelType": "LAB_Perceptual",
+      "transformationMatrix": [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]],
+      "gammaCorrection": {"red": 2.2, "green": 2.2, "blue": 2.2},
+      "whitePoint": {"x": 0.3127, "y": 0.3290, "name": "D65"},
+      "calibrationPoints": [...],
+      "qualityMetrics": {
+        "averageDeltaE": 1.2,
+        "maxDeltaE": 2.1,
+        "rSquared": 0.999
+      },
+      "lastCalibrated": "2025-01-14T11:20:00Z",
+      "createdDate": "2025-01-05T16:45:00Z"
     }
   ]
 }
 ```
 
 **UI Addition:**
-- New "Profiles" tab in Settings
-- Dropdown to select active profile
-- "Test Calibration" button to preview adjustments
+- New "Color Profiles" tab in Settings window
+- Profile list with columns: Name, App, Wheel Type, Quality (ΔE), Last Calibrated
+- Actions: New Profile, Edit, Duplicate, Delete, Export, Import
+- Dropdown in main window to select active profile
+- "Test Calibration" button opens preview dialog
+- Auto-detection notification: "Detected Photoshop - load saved profile?"
 
 #### 2.4 Live Color Preview
-**Feature:** Show how colors will appear after calibration before drawing.
+
+**Feature:** Show how colors will appear after calibration before drawing, with Delta-E difference indicators.
 
 **Implementation:**
 ```csharp
 // In MainWindow.axaml.cs
 private void UpdateColorPreview()
 {
-    // Show side-by-side comparison
-    // Left: Original colors
-    // Right: Calibrated colors
-    // Highlight differences
-}
-```
-
-**UI Addition:**
-- Split preview panel in Layers tab
-- Toggle switch "Show Calibrated Preview"
-- Delta-E difference indicator for each color
-
-#### 2.5 Hotkey-Activated Color Picker
-**Feature:** Global hotkey to pick colors while in another application.
-
-**Implementation:**
-```csharp
-// Using SharpHook (already in project)
-private static KeyCode _colorPickHotkey = KeyCode.F9;
-
-private async void OnGlobalKeyDown(object sender, KeyboardHookEventArgs e)
-{
-    if (e.Data.Keyboard.KeyCode == _colorPickHotkey && 
-        ModifierKeys.Control == (e.Data.Keyboard.Modifiers & ModifierKeys.Control))
+    // Get current input colors
+    var inputColors = ParseHexColorsInput();
+    
+    // Apply active calibration profile
+    var calibratedColors = inputColors.Select(c => 
+        ColorCalibrator.ApplyCalibration(c, ActiveProfile)).ToList();
+    
+    // Render side-by-side comparison
+    OriginalPreviewPanel.Colors = inputColors;
+    CalibratedPreviewPanel.Colors = calibratedColors;
+    
+    // Calculate and display Delta-E for each color
+    for (int i = 0; i < inputColors.Count; i++)
     {
-        await PickColorAtCursorAsync();
+        var deltaE = ColorDifference.DeltaE2000(
+            ColorSpaceConverter.RGBtoLAB(inputColors[i]),
+            ColorSpaceConverter.RGBtoLAB(calibratedColors[i])
+        );
+        
+        DeltaEIndicators[i].Text = $"ΔE {deltaE:F1}";
+        DeltaEIndicators[i].Color = deltaE < 2.0 ? Colors.Green : 
+                                     deltaE < 4.0 ? Colors.Yellow : Colors.Red;
     }
 }
 ```
 
 **UI Addition:**
-- Settings → Hotkeys → "Color Picker"
-- Default: Ctrl+F9
-- Option: "Copy to clipboard automatically"
+- Split preview panel in Layers tab with toggle "Show Calibrated Preview"
+- Left side: Original colors from input
+- Right side: Calibrated colors after transformation
+- Below each color swatch: Delta-E value with color coding
+  - Green (ΔE < 2.0): Imperceptible difference
+  - Yellow (ΔE 2.0-4.0): Noticeable but acceptable
+  - Red (ΔE > 4.0): Significant difference, recalibrate recommended
+- Tooltip on hover showing exact RGB values before/after
+- "Apply to All Layers" checkbox to preview full image
+
+#### 2.5 Hotkey-Activated Color Picker
+
+**Feature:** Global hotkey to pick colors while in another application, with optional auto-calibration.
+
+**Implementation:**
+```csharp
+// Using SharpHook (already in project)
+private static KeyCode _colorPickHotkey = KeyCode.F9;
+private static ModifierKeys _colorPickModifier = ModifierKeys.Control;
+
+private async void OnGlobalKeyDown(object sender, KeyboardHookEventArgs e)
+{
+    if (e.Data.Keyboard.KeyCode == _colorPickHotkey && 
+        _colorPickModifier == (e.Data.Keyboard.Modifiers & _colorPickModifier))
+    {
+        await PickColorAtCursorAsync();
+    }
+    
+    // Double-tap for magnified pick
+    if (e.Data.Keyboard.KeyCode == _colorPickHotkey && 
+        e.Timestamp - _lastPickTime < 300) // 300ms double-tap
+    {
+        await PickColorWithMagnifierAsync();
+    }
+}
+
+private async Task PickColorAtCursorAsync()
+{
+    var cursorPos = MouseHelper.GetCursorPosition();
+    var color = ScreenCapture.GetPixelColor(cursorPos.X, cursorPos.Y);
+    
+    // Apply calibration if profile is active
+    if (ActiveProfile != null)
+    {
+        color = ColorCalibrator.ApplyCalibration(color, ActiveProfile);
+    }
+    
+    // Copy to clipboard or add to recent colors
+    Clipboard.SetText(color.ToHex());
+    AddToRecentColors(color);
+    
+    // Show toast notification
+    ShowColorPickNotification(color, cursorPos);
+}
+
+private async Task PickColorWithMagnifierAsync()
+{
+    // Show magnifier overlay at cursor position
+    var magnifier = new ColorMagnifierWindow
+    {
+        ZoomLevel = 8,
+        SampleSize = 5, // Average 5x5 pixel region
+        Owner = Application.Current.MainWindow
+    };
+    
+    var result = await magnifier.ShowDialogAsync();
+    if (result.HasValue)
+    {
+        // Same processing as above
+    }
+}
+```
+
+**UI Addition:**
+- Settings → Hotkeys → "Color Picker" section
+  - Primary hotkey (default: Ctrl+F9)
+  - Magnifier mode hotkey (default: Double-tap F9 or Ctrl+Alt+F9)
+  - Checkbox: "Copy to clipboard automatically"
+  - Checkbox: "Apply active calibration profile"
+  - Dropdown: "Add to layer" / "Add to recent colors" / "Both"
+- System tray icon with right-click menu:
+  - "Pick Color" (activates eyedropper)
+  - "Open Calibration Wizard"
+  - "Recent Colors" submenu
+  - "Exit"
 
 ---
 
