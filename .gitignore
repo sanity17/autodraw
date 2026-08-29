@@ -1,1 +1,4 @@
-Nothing needs to be added to .gitignore since the changes only include markdown documentation files (.md) which are source files that should be tracked in version control.
+```
+# Documentation
+IMPROVEMENT_SUGGESTIONS.md
+```
