@@ -75,6 +75,15 @@ public partial class MainWindow : Window
     private readonly List<Vector2> _colorPickerCalibrationPoints = new();
     private bool _capturingColorPicker;
 
+    /// <summary>Which calibration scheme the next captured clicks belong to.</summary>
+    private enum ColorPickerCalibrationMode
+    {
+        Wheel,
+        Slider
+    }
+
+    private ColorPickerCalibrationMode _calibrationMode = ColorPickerCalibrationMode.Wheel;
+
     public int widthLock = 0;
     public int heightLock = 0;
     public int widthNumber = 1;
@@ -85,6 +94,7 @@ public partial class MainWindow : Window
         DataContext = this; // This stupid piece of shit is required, unlike normal Xaml, fuck it.
         
         InitializeComponent();
+        UpdateColorPickerModeStatus();
 
         if (Design.IsDesignMode) return;
 
@@ -109,6 +119,7 @@ public partial class MainWindow : Window
         MinimizeAppButton.Click += MinimizeAppOnClick;
         SettingsButton.Click += OpenSettingsOnClick;
         DevButton.Click += (_, _) => OpenDevWindow();
+        ColorPickerHelpButton.Click += ShowColorPickerHelp;
 
         // Base
         Closing += (_, _) => Cleanup();
@@ -156,7 +167,7 @@ public partial class MainWindow : Window
         RefreshConfigList(this, null);
 
         Input.Start();
-        Input.taskHook.KeyReleased += ConfigureColorPickerWithF5;
+        Input.taskHook.KeyReleased += ConfigureColorPicker;
     }
 
     // User Configuration Handles
@@ -185,7 +196,6 @@ public partial class MainWindow : Window
         _aiPrompt = null;
     }
 
-
     // Core Functions
 
     public void Cleanup()
@@ -198,11 +208,28 @@ public partial class MainWindow : Window
         Drawing.Halt();
     }
 
-    private void ConfigureColorPickerWithF5(object? sender, KeyboardHookEventArgs e)
+    /// <summary>
+    /// Listens for the calibration hotkeys on the global hook.
+    ///   F5 -> capture four points for the wheel color picker (center, rim, brightness top, brightness bottom).
+    ///   F6 -> capture six points for the slider color picker (min/max of the Hue, Saturation, and Value sliders).
+    /// </summary>
+    private void ConfigureColorPicker(object? sender, KeyboardHookEventArgs e)
     {
-        if (e.Data.KeyCode != KeyCode.VcF5 || _capturingColorPicker) return;
+        if (_capturingColorPicker) return;
+        if (e.Data.KeyCode == KeyCode.VcF5)
+        {
+            StartColorPickerCalibration(ColorPickerCalibrationMode.Wheel);
+        }
+        else if (e.Data.KeyCode == KeyCode.VcF6)
+        {
+            StartColorPickerCalibration(ColorPickerCalibrationMode.Slider);
+        }
+    }
 
+    private void StartColorPickerCalibration(ColorPickerCalibrationMode mode)
+    {
         _capturingColorPicker = true;
+        _calibrationMode = mode;
         _colorPickerCalibrationPoints.Clear();
         Input.taskHook.MouseClicked += CaptureColorPickerPoint;
         Avalonia.Threading.Dispatcher.UIThread.Invoke(() => WindowState = WindowState.Minimized);
@@ -212,18 +239,51 @@ public partial class MainWindow : Window
     {
         if (e.Data.Button != SharpHook.Native.MouseButton.Button1) return;
         _colorPickerCalibrationPoints.Add(new Vector2(e.Data.X, e.Data.Y));
-        if (_colorPickerCalibrationPoints.Count < 4) return;
 
-        ColorPicker.SaveWheelCalibration(
-            _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
-            _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3]);
+        var requiredPoints = _calibrationMode == ColorPickerCalibrationMode.Wheel ? 4 : 6;
+        if (_colorPickerCalibrationPoints.Count < requiredPoints) return;
+
+        if (_calibrationMode == ColorPickerCalibrationMode.Wheel)
+        {
+            ColorPicker.SaveWheelCalibration(
+                _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
+                _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3]);
+        }
+        else
+        {
+            ColorPicker.SaveSliderCalibration(
+                _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
+                _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3],
+                _colorPickerCalibrationPoints[4], _colorPickerCalibrationPoints[5]);
+        }
+
         Input.taskHook.MouseClicked -= CaptureColorPickerPoint;
         _capturingColorPicker = false;
         Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
         {
             WindowState = WindowState.Normal;
-            new MessageBox().ShowMessageBox("Color picker configured", "Wheel calibration saved. The Set Color Hex action will now select colors using the calibrated wheel.");
+            UpdateColorPickerModeStatus();
+            var message = _calibrationMode == ColorPickerCalibrationMode.Wheel
+                ? "Wheel calibration saved. The Set Color Hex action will now select colors using the calibrated wheel."
+                : "Slider calibration saved. The Set Color Hex action will now drive the Hue, Saturation, and Value sliders in order.";
+            new MessageBox().ShowMessageBox("Color picker configured", message);
         });
+    }
+
+    private void UpdateColorPickerModeStatus()
+    {
+        var mode = Config.GetEntry("ColorPickerMode");
+        ColorPickerModeLabel.Content = mode switch
+        {
+            "Wheel" => "Color Picker: Wheel",
+            "Slider" => "Color Picker: Slider (press F6 to re-calibrate)",
+            _ => "Color Picker: Wheel (press F5 to calibrate)"
+        };
+    }
+
+    private void ShowColorPickerHelp(object? sender, RoutedEventArgs e)
+    {
+        new MessageBox().ShowMessageBox("Color Picker Setup", ColorPicker.GetUsageInstructions());
     }
     
     public ImageProcessing.Filters GetSelectFilters() // This has practically become an Update _CurrentFilters if anything, but aight.
@@ -291,7 +351,6 @@ public partial class MainWindow : Window
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed && e.GetPosition(this).Y <= 20)
             BeginMoveDrag(e);
     }
-
 
     // Base UI Handles
 
@@ -606,7 +665,6 @@ public partial class MainWindow : Window
         WidthLockImage.Classes.Add(widthLock > 0 ? "LockedIcon" : "UnlockedIcon");
     }
 
-
     private void DrawIntervalOnTextChanging(object? sender, TextChangingEventArgs e)
     {
         HandleTextChange(e);
@@ -877,9 +935,35 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Split the image
-        var splitResults = ImageProcessing.SplitImageByColors(_preFxBitmap, targetColors, (byte)_alphaThresh);
+        PopulateLayers(ImageProcessing.SplitImageByColors(_preFxBitmap, targetColors, (byte)_alphaThresh));
+    }
 
+    public void AutoGenerateLayersButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_preFxBitmap == null || _preFxBitmap.Width <= 1 || _preFxBitmap.Height <= 1)
+        {
+            new MessageBox().ShowMessageBox("Error!", "Please import an image first.", "error");
+            return;
+        }
+
+        if (!int.TryParse(PaletteSizeInput.Text, out var paletteSize) || paletteSize is < 1 or > 64)
+        {
+            new MessageBox().ShowMessageBox("Error!", "Palette size must be a number from 1 to 64.", "error");
+            return;
+        }
+
+        var targetColors = ImageProcessing.ExtractPalette(_preFxBitmap, paletteSize, (byte)_alphaThresh);
+        if (targetColors.Count == 0)
+        {
+            new MessageBox().ShowMessageBox("Warning", "No opaque pixels were found in the image.", "warning");
+            return;
+        }
+
+        PopulateLayers(ImageProcessing.SplitImageByColors(_preFxBitmap, targetColors, (byte)_alphaThresh));
+    }
+
+    private void PopulateLayers(List<ColorLayerResult> splitResults)
+    {
         foreach (var layer in LayersContext)
         {
             layer.RawBitmap?.Dispose();

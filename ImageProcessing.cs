@@ -490,6 +490,109 @@ public static class ImageProcessing
         public int Width = 2;
     }
 
+    public static unsafe List<SKColor> ExtractPalette(SKBitmap sourceBitmap, int paletteSize, byte alphaThreshold)
+    {
+        paletteSize = Math.Clamp(paletteSize, 1, 64);
+
+        var histogram = new Dictionary<int, int>();
+        var sourcePtr = (uint*)sourceBitmap.GetPixels().ToPointer();
+        for (var y = 0; y < sourceBitmap.Height; y++)
+        for (var x = 0; x < sourceBitmap.Width; x++)
+        {
+            GetPixel(sourcePtr + sourceBitmap.Width * y + x, out var red, out var green, out var blue, out var alpha);
+            if (alpha < alphaThreshold) continue;
+
+            var redBin = red >> 3;
+            var greenBin = green >> 3;
+            var blueBin = blue >> 3;
+            var key = (redBin << 10) | (greenBin << 5) | blueBin;
+            histogram[key] = histogram.GetValueOrDefault(key) + 1;
+        }
+
+        if (histogram.Count == 0) return new();
+
+        var candidates = histogram
+            .OrderByDescending(entry => entry.Value)
+            .Take(Math.Max(paletteSize * 8, 64))
+            .Select(entry =>
+            {
+                var red = ((entry.Key >> 10) & 31) * 8 + 4;
+                var green = ((entry.Key >> 5) & 31) * 8 + 4;
+                var blue = (entry.Key & 31) * 8 + 4;
+                return (Color: new SKColor((byte)red, (byte)green, (byte)blue), Weight: entry.Value);
+            })
+            .ToList();
+
+        var centroids = new List<(float Red, float Green, float Blue)>();
+        centroids.Add((candidates[0].Color.Red, candidates[0].Color.Green, candidates[0].Color.Blue));
+        while (centroids.Count < paletteSize && centroids.Count < candidates.Count)
+        {
+            var next = candidates
+                .Where(candidate => centroids.All(centroid => ColorDistance(candidate.Color, centroid) > 0))
+                .OrderByDescending(candidate =>
+                    candidate.Weight * centroids.Min(centroid => ColorDistance(candidate.Color, centroid)))
+                .FirstOrDefault();
+            if (next == default) break;
+            centroids.Add((next.Color.Red, next.Color.Green, next.Color.Blue));
+        }
+
+        for (var iteration = 0; iteration < 8; iteration++)
+        {
+            var redTotals = new double[centroids.Count];
+            var greenTotals = new double[centroids.Count];
+            var blueTotals = new double[centroids.Count];
+            var weights = new int[centroids.Count];
+
+            foreach (var candidate in candidates)
+            {
+                var closest = ClosestCentroid(candidate.Color, centroids);
+                redTotals[closest] += candidate.Color.Red * candidate.Weight;
+                greenTotals[closest] += candidate.Color.Green * candidate.Weight;
+                blueTotals[closest] += candidate.Color.Blue * candidate.Weight;
+                weights[closest] += candidate.Weight;
+            }
+
+            for (var i = 0; i < centroids.Count; i++)
+            {
+                if (weights[i] == 0) continue;
+                centroids[i] = (
+                    (float)(redTotals[i] / weights[i]),
+                    (float)(greenTotals[i] / weights[i]),
+                    (float)(blueTotals[i] / weights[i]));
+            }
+        }
+
+        return centroids
+            .Select(centroid => new SKColor(
+                (byte)Math.Clamp((int)Math.Round(centroid.Red), 0, 255),
+                (byte)Math.Clamp((int)Math.Round(centroid.Green), 0, 255),
+                (byte)Math.Clamp((int)Math.Round(centroid.Blue), 0, 255)))
+            .Distinct()
+            .ToList();
+    }
+
+    private static double ColorDistance(SKColor color, (float Red, float Green, float Blue) centroid)
+    {
+        var red = color.Red - centroid.Red;
+        var green = color.Green - centroid.Green;
+        var blue = color.Blue - centroid.Blue;
+        return red * red + green * green + blue * blue;
+    }
+
+    private static int ClosestCentroid(SKColor color, List<(float Red, float Green, float Blue)> centroids)
+    {
+        var closest = 0;
+        var distance = double.MaxValue;
+        for (var i = 0; i < centroids.Count; i++)
+        {
+            var candidateDistance = ColorDistance(color, centroids[i]);
+            if (candidateDistance >= distance) continue;
+            distance = candidateDistance;
+            closest = i;
+        }
+        return closest;
+    }
+
     public static unsafe List<ColorLayerResult> SplitImageByColors(SKBitmap sourceBitmap, List<SKColor> targetColors, byte alphaThreshold)
     {
         var width = sourceBitmap.Width;

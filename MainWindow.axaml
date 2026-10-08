@@ -82,7 +82,7 @@
         <Image Classes="MainBodySecond" Grid.Row="1" />
         <Image Classes="MainBodyThird" Grid.Row="1" />
 
-        <Grid Classes="Body" Grid.Row="1" Name="Body" Margin="8" RowDefinitions="*,8,32" ColumnDefinitions="3*,8,300">
+        <Grid Classes="Body" Grid.Row="1" Name="Body" Margin="8" RowDefinitions="*,4,48" ColumnDefinitions="3*,8,300">
             <Grid Grid.Column="0" Grid.RowSpan="3" RowDefinitions="1*,48,26,4">
                 <Canvas Classes="ImagePreview" Width="{Binding $parent.Bounds.Width}" VerticalAlignment="Stretch">
                     <Canvas.ContextMenu>
@@ -337,10 +337,16 @@
                                 <StackPanel Spacing="6" Margin="4">
                                     <Label FontSize="14" FontWeight="Medium" Content="Hex Colors (comma/space-separated):"/>
                                     <TextBox Name="HexColorsInput" CornerRadius="4" Height="48" AcceptsReturn="True" TextWrapping="Wrap" Watermark="e.g. #FF0000, #00FF00, #0000FF" />
+                                    <Grid ColumnDefinitions="Auto,8,*,8,Auto" VerticalAlignment="Center">
+                                        <Label Grid.Column="0" VerticalAlignment="Center" Content="Auto colors:"/>
+                                        <TextBox Grid.Column="2" Name="PaletteSizeInput" Width="64" Text="8" HorizontalContentAlignment="Center"/>
+                                        <Label Grid.Column="4" VerticalAlignment="Center" Content="(1-64)"/>
+                                    </Grid>
                                     
-                                    <Grid ColumnDefinitions="*, 8, *">
-                                        <Button Grid.Column="0" Name="GenerateLayersButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="GenerateLayersButton_OnClick" Content="Generate Layers"/>
-                                        <Button Grid.Column="2" Name="ClearLayersButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="ClearLayersButton_OnClick" Content="Clear Layers"/>
+                                    <Grid ColumnDefinitions="*, 8, *, 8, *">
+                                        <Button Grid.Column="0" Name="GenerateLayersButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="GenerateLayersButton_OnClick" Content="Use Hex Palette"/>
+                                        <Button Grid.Column="2" Name="AutoGenerateLayersButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="AutoGenerateLayersButton_OnClick" Content="Auto Generate"/>
+                                        <Button Grid.Column="4" Name="ClearLayersButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="ClearLayersButton_OnClick" Content="Clear Layers"/>
                                     </Grid>
                                     
                                     <ListBox Name="LayersListBox" ItemsSource="{Binding LayersContext}" Background="#2000" CornerRadius="4" MinHeight="150" MaxHeight="250">
@@ -366,21 +372,24 @@
                     </TabControl>
                 </TabItem>
                 
+                <TabItem Header="Painting">
+                    <local:PaintingPanel x:Name="PaintingPanelMount"/>
+                </TabItem>
+                
             </TabControl>
             
-            <Grid Grid.Row="2" Grid.Column="2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="32"/>
-                    <ColumnDefinition Width="4"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="4"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Button Name="OpenButton" Grid.Column="0" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" Padding="0">
-                    <Image Source="avares://Autodraw/Assets/add-image.png"/>
-                </Button>
-                <Button Name="ProcessButton" Grid.Column="2" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" FontSize="13" Content="{x:Static assets:Resources.ProcessIMG}"/>
-                <Button Name="RunButton" Grid.Column="4" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" FontSize="13" Content="{x:Static assets:Resources.BeginDraw}"/>
+            <Grid Grid.Row="2" Grid.Column="2" RowDefinitions="16,32">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                    <Label Name="ColorPickerModeLabel" Grid.Column="0" Padding="0" FontSize="10" VerticalContentAlignment="Center"/>
+                    <Button Name="ColorPickerHelpButton" Grid.Column="1" Padding="4,0" FontSize="10" Content="Color Picker Help"/>
+                </Grid>
+                <Grid Grid.Row="1" ColumnDefinitions="32,4,*,4,*">
+                    <Button Name="OpenButton" Grid.Column="0" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" Padding="0">
+                        <Image Source="avares://Autodraw/Assets/add-image.png"/>
+                    </Button>
+                    <Button Name="ProcessButton" Grid.Column="2" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" FontSize="13" Content="{x:Static assets:Resources.ProcessIMG}"/>
+                    <Button Name="RunButton" Grid.Column="4" Classes="NoOutline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalAlignment="Stretch" VerticalContentAlignment="Center" CornerRadius="4" FontSize="13" Content="{x:Static assets:Resources.BeginDraw}"/>
+                </Grid>
             </Grid>
         </Grid>
     </Grid>

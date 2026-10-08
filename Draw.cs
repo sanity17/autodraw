@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -14,7 +14,6 @@ using SharpHook.Native;
 using SkiaSharp;
 
 namespace Autodraw;
-
 
 // This is solely for Inputs from the DrawStack stuff.
 public class InputAction
@@ -49,10 +48,20 @@ public class InputAction
             case ActionType.LeftClick:
             case ActionType.RightClick:
             case ActionType.MoveTo:
-            case ActionType.SetColorHex:
                 if (data is Vector2 pos)
                 {
                     Position = pos;
+                }
+                break;
+
+            case ActionType.SetColorHex:
+                if (data is Vector2 colorPosition)
+                {
+                    Position = colorPosition;
+                }
+                else
+                {
+                    Data = data as string;
                 }
                 break;
 
@@ -105,7 +114,7 @@ public class InputAction
                 break;
 
             case ActionType.SetColorHex:
-                if (ColorPicker.UsesWheel)
+                if (ColorPicker.IsCalibrated)
                 {
                     await ColorPicker.SelectWheelColor(Data ?? string.Empty);
                     break;
@@ -148,10 +157,10 @@ public class InputAction
     }
 }
 
-
 public static class Drawing
 {
-    
+    public static bool Painting_Legacy;
+
     // Variables
 
     public static int Interval = 10000;
@@ -173,7 +182,6 @@ public static class Drawing
 
     public static bool ShowPopup =
         Config.GetEntry("showPopup") == null || bool.Parse(Config.GetEntry("showPopup") ?? "true");
-
 
     private static DrawDataDisplay? _dataDisplay;
 
@@ -197,7 +205,6 @@ public static class Drawing
         _completeTotalScan = 0;
         var _pixelArray = new byte[bitmap.Width, bitmap.Height];
         var bitPtr = (byte*)bitmap.GetPixels().ToPointer();
-
 
         for (var y = 0; y < bitmap.Height; y++)
         for (var x = 0; x < bitmap.Width; x++)
