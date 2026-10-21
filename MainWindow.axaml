@@ -52,6 +52,8 @@
                         VerticalContentAlignment="Center">
                     <Image Source="avares://Autodraw/Assets/gear.png" />
                 </Button>
+                <Button Name="HexedDrawButton" Margin="4 0 0 0" Padding="6 0" Background="Transparent" Height="18"
+                        VerticalContentAlignment="Center" FontSize="11" Content="Hexed" ToolTip.Tip="Open HexedDrawer features" />
             </StackPanel>
 
             <Menu>
@@ -59,6 +61,7 @@
                     <MenuItem x:Name="PasteImage" Header="_Paste Image"
                               Command="{Binding $parent[Window].PasteControl}"
                               CommandParameter="{Binding ElementName=MainWindow}" HotKey="Ctrl+V" />
+                    <MenuItem Header="_HexedDrawer" Click="HexedDrawMenu_OnClick" />
                 </MenuItem>
             </Menu>
 
@@ -170,8 +173,10 @@
                                         <ToolTip.Tip>This is the algorithm used for drawing, we suggest DFS for most things.</ToolTip.Tip>
                                         <Label FontSize="16" Content="{x:Static assets:Resources.GeneralDrawAlgorithm}"/>
                                         <ComboBox Name="AlgorithmSelection" SelectedIndex="0" FontSize="12" Padding="4 " Margin="4" MinHeight="25" HorizontalAlignment="Stretch">
+                                            <ToolTip.Tip>How the drawing path is generated: DFS covers each shape in a single continuous line, Edge-Following prefers outlines, Concentric paints each shape from the centre outward in rings.</ToolTip.Tip>
                                             <ComboBoxItem Content="{x:Static assets:Resources.AlgorithmDFS}"/>
                                             <ComboBoxItem Content="{x:Static assets:Resources.AlgorithmEdgeTraversal}"/>
+                                            <ComboBoxItem Content="{x:Static assets:Resources.AlgorithmConcentric}"/>
                                         </ComboBox>
                                     </StackPanel>
                                     <CheckBox Name="FreeDrawCheckbox" Grid.Row="3" Grid.ColumnSpan="3" Grid.Column="0" Margin="4 0" Content="{x:Static assets:Resources.FDBypass}" />

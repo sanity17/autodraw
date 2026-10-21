@@ -1,8 +1,11 @@
 using System;
 using System.Globalization;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
+using Autodraw.Configuration;
+using Autodraw.Painting.ColorInput;
 
 namespace Autodraw;
 
@@ -31,10 +34,14 @@ public static class ColorPicker
         "3. Brightness/value ramp top",
         "4. Brightness/value ramp bottom",
         "",
-        "Sliders (F6): click 6 points in order:",
+        "Sliders (F7): click 6 points in order:",
         "1. Hue slider: left, then right",
         "2. Saturation slider: left, then right",
         "3. Value slider: left, then right",
+        "",
+        "HexedDrawer Color Box:",
+        "1. Calibrate the hue slider: click its start, then its end",
+        "2. Calibrate the box: click its top-left, then bottom-right",
         "",
         "AutoDraw minimizes during capture.",
         "It restores after the final click.",
@@ -60,6 +67,16 @@ public static class ColorPicker
         Config.SetEntry("ColorBrightnessTopY", brightnessTop.Y.ToString(CultureInfo.InvariantCulture));
         Config.SetEntry("ColorBrightnessBottomX", brightnessBottom.X.ToString(CultureInfo.InvariantCulture));
         Config.SetEntry("ColorBrightnessBottomY", brightnessBottom.Y.ToString(CultureInfo.InvariantCulture));
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Circle";
+            c.PickerType = "Wheel";
+            c.WheelCenter = new ScreenPoint((int)center.X, (int)center.Y);
+            c.WheelEdge = new ScreenPoint((int)rim.X, (int)rim.Y);
+            c.WheelAngle = Math.Atan2(rim.Y - center.Y, rim.X - center.X) * 180d / Math.PI;
+            c.WheelDark = new ScreenPoint((int)brightnessBottom.X, (int)brightnessBottom.Y);
+            c.WheelBright = new ScreenPoint((int)brightnessTop.X, (int)brightnessTop.Y);
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -99,6 +116,61 @@ public static class ColorPicker
     }
 
     // ---------------------------------------------------------------------
+    // HexedDrawer color-circle / color-box calibration
+    // ---------------------------------------------------------------------
+
+    /// <summary>Persists only the hue/saturation wheel centre and rim, leaving the existing
+    /// brightness ramp untouched. Used by the separate "Calibrate Color Circle" button.</summary>
+    public static void SaveCircleCalibration(Vector2 center, Vector2 rim)
+    {
+        Config.SetEntry(ModeEntry, WheelMode);
+        Config.SetEntry("ColorWheelCenterX", center.X.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorWheelCenterY", center.Y.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorWheelRimX", rim.X.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorWheelRimY", rim.Y.ToString(CultureInfo.InvariantCulture));
+        UpdateConfig(c => { c.ColorPickingMethod = "Circle"; c.PickerType = "Wheel"; c.WheelCenter = new ScreenPoint((int)center.X, (int)center.Y); c.WheelEdge = new ScreenPoint((int)rim.X, (int)rim.Y); c.WheelAngle = Math.Atan2(rim.Y - center.Y, rim.X - center.X) * 180d / Math.PI; });
+    }
+
+    /// <summary>Persists only the dark/bright ends of the brightness ramp.</summary>
+    public static void SaveBrightnessCalibration(Vector2 dark, Vector2 bright)
+    {
+        Config.SetEntry(ModeEntry, WheelMode);
+        Config.SetEntry("ColorBrightnessBottomX", dark.X.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorBrightnessBottomY", dark.Y.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorBrightnessTopX", bright.X.ToString(CultureInfo.InvariantCulture));
+        Config.SetEntry("ColorBrightnessTopY", bright.Y.ToString(CultureInfo.InvariantCulture));
+        UpdateConfig(c => { c.ColorPickingMethod = "Circle"; c.PickerType = "Wheel"; c.WheelDark = new ScreenPoint((int)dark.X, (int)dark.Y); c.WheelBright = new ScreenPoint((int)bright.X, (int)bright.Y); });
+    }
+
+    /// <summary>Persists the 2D color box calibration and the rainbow hue slider endpoints.</summary>
+    public static void SaveBoxCalibration(Vector2 hueStart, Vector2 hueEnd, Vector2 topLeft, Vector2 bottomRight)
+    {
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Box";
+            c.PickerType = "Box";
+            c.BoxHueStart = new ScreenPoint((int)hueStart.X, (int)hueStart.Y);
+            c.BoxHueEnd = new ScreenPoint((int)hueEnd.X, (int)hueEnd.Y);
+            c.BoxTopLeft = new ScreenPoint((int)topLeft.X, (int)topLeft.Y);
+            c.BoxBottomRight = new ScreenPoint((int)bottomRight.X, (int)bottomRight.Y);
+        });
+    }
+
+    private static void UpdateConfig(Action<AutoDrawConfig> update)
+    {
+        try
+        {
+            var config = DdConfigService.Current;
+            update(config);
+            if (!DdConfigService.TryApply(config, out var error)) Utils.Log("Color calibration write-back rejected: " + error);
+        }
+        catch (Exception ex)
+        {
+            Utils.Log("Color calibration write-back failed: " + ex.Message);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Dispatch
     // ---------------------------------------------------------------------
 
@@ -132,6 +204,94 @@ public static class ColorPicker
         Input.MoveTo((short)MathF.Round(brightnessPoint.X), (short)MathF.Round(brightnessPoint.Y));
         Input.SendClick(Input.MouseTypes.MouseLeft);
         await Drawing.NOP(500_000);
+    }
+
+    /// <summary>Selects a colour using the portable dd.json calibration, falling back to legacy calibration.</summary>
+    public static async Task SelectColor(string hex)
+    {
+        var config = DdConfigService.Current;
+        if (config.EnableMacros && config.OpenPickerCoordinate is { } open)
+        {
+            Click(open);
+            await Drawing.DelaySeconds(config.DelayOpen);
+        }
+
+        var selected = false;
+        var color = SKColor.Parse(hex);
+        if (config.PickerType.Equals("RGB", StringComparison.OrdinalIgnoreCase) && config.RgbCoordinates.Count == 3)
+        {
+            var channels = new[] { color.Red, color.Green, color.Blue };
+            for (var i = 0; i < 3; i++) { Click(config.RgbCoordinates[i]); Input.ReplaceFocusedText(channels[i].ToString(CultureInfo.InvariantCulture)); await Drawing.DelaySeconds(config.DelayInput); }
+            selected = true;
+        }
+        else if (config.PickerType.Equals("HEX", StringComparison.OrdinalIgnoreCase) && config.HexCoordinate is { } hexPoint)
+        {
+            Click(hexPoint); Input.ReplaceFocusedText(hex); selected = true;
+        }
+        else if (config.PickerType.Equals("HSV", StringComparison.OrdinalIgnoreCase) && config.HsvCoordinates.Count == 3)
+        {
+            color.ToHsv(out var hue, out var saturation, out var value);
+            var values = new[] { hue, saturation, value };
+            for (var i = 0; i < 3; i++) { Click(config.HsvCoordinates[i]); Input.ReplaceFocusedText(Math.Round(values[i]).ToString(CultureInfo.InvariantCulture)); await Drawing.DelaySeconds(config.DelayInput); }
+            selected = true;
+        }
+        else if (config.PickerType.Equals("Wheel", StringComparison.OrdinalIgnoreCase) && config.WheelCenter is { } center && config.WheelEdge is { } edge && config.WheelDark is { } dark && config.WheelBright is { } bright)
+        {
+            await SelectConfiguredWheel(color, center, edge, dark, bright, config.WheelDirection, config.WheelAngle); selected = true;
+        }
+        else if (config.PickerType.Equals("Box", StringComparison.OrdinalIgnoreCase) &&
+                 config.BoxHueStart is { } hueStart && config.BoxHueEnd is { } hueEnd &&
+                 config.BoxTopLeft is { } boxTopLeft && config.BoxBottomRight is { } boxBottomRight)
+        {
+            await SelectConfiguredBox(color, hueStart, hueEnd, boxTopLeft, boxBottomRight); selected = true;
+        }
+        else if (config.IsPaletteMatchPicker)
+        {
+            // No wheel drive: the nearest captured palette slot's screen coordinate is
+            // clicked instead.  selected stays false when no slot resolves, so the
+            // legacy wheel fallback below still runs as a safety net.
+            var paletteInput = new PaletteGridInput();
+            if (paletteInput.IsCalibrated)
+            {
+                await paletteInput.ApplyColor(hex, CancellationToken.None);
+                selected = true;
+            }
+        }
+
+        if (!selected) await SelectWheelColor(hex);
+        if (config.EnableMacros && config.ClosePickerCoordinate is { } close)
+        {
+            await Drawing.DelaySeconds(config.DelayClose);
+            Click(close);
+        }
+    }
+
+    private static void Click(ScreenPoint point) { Input.MoveTo((short)point.X, (short)point.Y); Input.SendClick(Input.MouseTypes.MouseLeft); }
+    private static async Task SelectConfiguredWheel(SKColor color, ScreenPoint center, ScreenPoint edge, ScreenPoint dark, ScreenPoint bright, string direction, double offsetDegrees)
+    {
+        color.ToHsv(out var hue, out var saturation, out var value);
+        var c = new Vector2(center.X, center.Y); var radius = Vector2.Distance(c, new Vector2(edge.X, edge.Y));
+        var sign = direction.Equals("CCW", StringComparison.OrdinalIgnoreCase) ? -1f : 1f;
+        var angle = ((float)offsetDegrees + sign * hue) * MathF.PI / 180f;
+        var point = c + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius * saturation / 100f;
+        Input.MoveTo((short)MathF.Round(point.X), (short)MathF.Round(point.Y)); Input.SendClick(Input.MouseTypes.MouseLeft);
+        await Drawing.DelaySeconds(DdConfigService.Current.DelayInput);
+        var brightness = Vector2.Lerp(new Vector2(dark.X, dark.Y), new Vector2(bright.X, bright.Y), value / 100f);
+        Input.MoveTo((short)MathF.Round(brightness.X), (short)MathF.Round(brightness.Y)); Input.SendClick(Input.MouseTypes.MouseLeft);
+    }
+
+    private static async Task SelectConfiguredBox(SKColor color, ScreenPoint hueStart, ScreenPoint hueEnd, ScreenPoint topLeft, ScreenPoint bottomRight)
+    {
+        color.ToHsv(out var hue, out var saturation, out var value);
+        var huePoint = Vector2.Lerp(new Vector2(hueStart.X, hueStart.Y), new Vector2(hueEnd.X, hueEnd.Y), Math.Clamp(hue / 360f, 0f, 1f));
+        Input.MoveTo((short)MathF.Round(huePoint.X), (short)MathF.Round(huePoint.Y));
+        Input.SendClick(Input.MouseTypes.MouseLeft);
+        await Drawing.DelaySeconds(DdConfigService.Current.DelayInput);
+        var boxPoint = new Vector2(
+            topLeft.X + Math.Clamp(saturation / 100f, 0f, 1f) * (bottomRight.X - topLeft.X),
+            topLeft.Y + (1f - Math.Clamp(value / 100f, 0f, 1f)) * (bottomRight.Y - topLeft.Y));
+        Input.MoveTo((short)MathF.Round(boxPoint.X), (short)MathF.Round(boxPoint.Y));
+        Input.SendClick(Input.MouseTypes.MouseLeft);
     }
 
     /// <summary>Selects a color by clicking each HSV slider at the position mapped from <paramref name="hex"/>.</summary>

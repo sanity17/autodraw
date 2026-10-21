@@ -421,3 +421,7 @@ Release/
 Builds/
 .idea/.idea.Autodraw/.idea/avalonia.xml
 .aider*
+
+# HexedDrawer Real-ESRGAN binaries/models and the source archive stay local-only.
+HexedDraw/
+HexedDraw.rar
