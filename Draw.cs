@@ -121,6 +121,16 @@ public class InputAction
                 var pickerType = DdConfigService.Current.PickerType;
                 if (!string.IsNullOrWhiteSpace(pickerType))
                 {
+                    // Never click blind coordinates: when the configured picker type has not
+                    // been set up, stop the draw and tell the user where to configure it.
+                    if (!ColorPicker.CanSelectCurrently)
+                    {
+                        Drawing.Halt();
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                            new MessageBox().ShowMessageBox("Color picker not set up",
+                                LocalizationManager.T("status_error_no_picker_setup"), "warn"));
+                        break;
+                    }
                     await ColorPicker.SelectColor(Data ?? string.Empty);
                     break;
                 }

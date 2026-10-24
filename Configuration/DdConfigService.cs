@@ -14,6 +14,33 @@ public static class DdConfigService
     public static AutoDrawConfig Current => Clone(_current);
     public static event EventHandler? Changed;
 
+    /// <summary>Invisible auto-save location so users never touch a config file by hand.</summary>
+    public static readonly string DefaultPath = Path.Combine(Config.FolderPath, "dd.json");
+
+    /// <summary>Loads the auto-saved configuration created by the UI, if any.</summary>
+    public static void AutoLoad()
+    {
+        try
+        {
+            if (!File.Exists(DefaultPath)) return;
+            if (TryLoad(DefaultPath, out var config, out var error) && config is not null)
+            {
+                _current = config;
+                Changed?.Invoke(null, EventArgs.Empty);
+            }
+            else Utils.Log("Auto-saved dd.json could not be loaded: " + error);
+        }
+        catch (Exception ex) { Utils.Log("Auto-loading dd.json failed: " + ex.Message); }
+    }
+
+    /// <summary>Writes the current configuration to <see cref="DefaultPath"/> so every UI change
+    /// survives a restart without the user saving anything.</summary>
+    private static void Persist()
+    {
+        try { File.WriteAllText(DefaultPath, JsonConvert.SerializeObject(_current, Settings)); }
+        catch (Exception ex) { Utils.Log("Auto-saving dd.json failed: " + ex.Message); }
+    }
+
     // Quantize methods the palette pipeline can actually honour.  Legacy "NeuQuant Neural-Net"
     // is normalized to the default KMeans++ path (matching historical silent behaviour); "median"
     // routes through MedianCut.
@@ -79,7 +106,7 @@ public static class DdConfigService
         if (Drawing.IsDrawing) { error = "Stop drawing before applying configuration changes."; return false; }
         Normalize(candidate);
         if (!Validate(candidate, out error)) return false;
-        _current = Clone(candidate); Changed?.Invoke(null, EventArgs.Empty); return true;
+        _current = Clone(candidate); Changed?.Invoke(null, EventArgs.Empty); Persist(); return true;
     }
 
     /// <summary>Keeps the HexedDrawer compatibility aliases and the legacy booleans in sync.</summary>
@@ -114,8 +141,17 @@ public static class DdConfigService
         if (c.LayerOrder.Equals("Largest Area First", StringComparison.OrdinalIgnoreCase)) c.LayerOrder = "Largest area first";
         if (c.LayerOrder.Equals("Dark to Bright", StringComparison.OrdinalIgnoreCase)) c.LayerOrder = "Darkness to brightness";
         if (c.ColorPickingMethod.Equals("Wheel", StringComparison.OrdinalIgnoreCase)) c.ColorPickingMethod = "Circle";
-        if (c.ColorPickingMethod.Equals("Circle", StringComparison.OrdinalIgnoreCase) && c.PickerType.Equals("Box", StringComparison.OrdinalIgnoreCase)) c.PickerType = "Wheel";
-        if (c.ColorPickingMethod.Equals("Box", StringComparison.OrdinalIgnoreCase)) c.PickerType = "Box";
+
+        // An explicit text-field picker (RGB / HSV / HEX / Palette Match) is authoritative and
+        // never gets clobbered back to Wheel/Box by the legacy color_picking_method alias.
+        var isTextPicker = c.IsPaletteMatchPicker
+            || c.PickerType.Equals("RGB", StringComparison.OrdinalIgnoreCase)
+            || c.PickerType.Equals("HEX", StringComparison.OrdinalIgnoreCase)
+            || c.PickerType.Equals("HSV", StringComparison.OrdinalIgnoreCase);
+        if (isTextPicker) c.ColorPickingMethod = "Circle";
+        else if (c.ColorPickingMethod.Equals("Box", StringComparison.OrdinalIgnoreCase)) c.PickerType = "Box";
+        else if (c.PickerType.Equals("Box", StringComparison.OrdinalIgnoreCase)) c.PickerType = "Wheel";
+        if (string.IsNullOrWhiteSpace(c.PickerType)) c.PickerType = c.ColorPickingMethod.Equals("Box", StringComparison.OrdinalIgnoreCase) ? "Box" : "Wheel";
     }
     public static void Export(string path) => File.WriteAllText(path, JsonConvert.SerializeObject(_current, Settings));
     public static bool Validate(AutoDrawConfig c, out string error)

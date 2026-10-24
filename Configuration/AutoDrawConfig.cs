@@ -49,7 +49,7 @@ public sealed class AutoDrawConfig
     [JsonProperty("use_seeds")] public bool UseSeeds { get; set; }
     [JsonProperty("seeds_count")] public int SeedsCount { get; set; } = 8000;
     [JsonProperty("remove_stray")] public bool RemoveStray { get; set; } = true;
-    [JsonProperty("picker_type")] public string PickerType { get; set; } = "RGB";
+    [JsonProperty("picker_type")] public string PickerType { get; set; } = "Wheel";
     /// <summary>True when the picker type is "Palette Match" (space-insensitive, e.g. LxPainter's "PaletteMatch").</summary>
     [JsonIgnore] public bool IsPaletteMatchPicker => string.Equals(PickerType?.Replace(" ", string.Empty), "PaletteMatch", StringComparison.OrdinalIgnoreCase);
     [JsonProperty("hex_coord"), JsonConverter(typeof(NullableScreenPointConverter))] public ScreenPoint? HexCoordinate { get; set; }

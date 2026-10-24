@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Numerics;
 using System.Threading;
@@ -26,27 +27,19 @@ public static class ColorPicker
 
     public static string GetUsageInstructions() => string.Join(Environment.NewLine, new[]
     {
-        "Color picker calibration",
+        "Set HEX Field: click the hex input field, e.g. a box that shows #A1B2C3.",
+        "Set R, G, B Fields: click the red field, then green, then blue.",
+        "Set H, S, V Fields: click the hue field, then saturation, then value.",
         "",
-        "Wheel (F5): click 4 points in order:",
-        "1. Hue/saturation wheel center",
-        "2. Wheel rim at center's hue",
-        "3. Brightness/value ramp top",
-        "4. Brightness/value ramp bottom",
+        "Calibrate Color Circle: click the wheel center, then the wheel rim where red is.",
+        "Calibrate Brightness Slider: click the dark end, then the bright end.",
         "",
-        "Sliders (F7): click 6 points in order:",
-        "1. Hue slider: left, then right",
-        "2. Saturation slider: left, then right",
-        "3. Value slider: left, then right",
+        "Calibrate Hue Slider: click the start of the rainbow slider, then its end.",
+        "Calibrate Sat/Val Box: click the top-left of the color area, then the bottom-right.",
         "",
-        "HexedDrawer Color Box:",
-        "1. Calibrate the hue slider: click its start, then its end",
-        "2. Calibrate the box: click its top-left, then bottom-right",
-        "",
-        "AutoDraw minimizes during capture.",
-        "It restores after the final click.",
-        "Your selected mode is saved between launches.",
-        "Use Set Color Hex in an action to select a color."
+        "AutoDraw minimizes during capture; a small guide window shows what to click next.",
+        "Press ESC or Cancel in the guide window to abort.",
+        "Everything you configure saves automatically."
     });
 
     // ---------------------------------------------------------------------
@@ -155,6 +148,85 @@ public static class ColorPicker
             c.BoxBottomRight = new ScreenPoint((int)bottomRight.X, (int)bottomRight.Y);
         });
     }
+
+    /// <summary>Persists the three RGB input fields clicked in order R, G, B and makes RGB the active picker.</summary>
+    public static void SaveRgbCalibration(Vector2 red, Vector2 green, Vector2 blue)
+    {
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Circle";
+            c.PickerType = "RGB";
+            c.RgbCoordinates = new List<ScreenPoint>
+            {
+                new((int)red.X, (int)red.Y),
+                new((int)green.X, (int)green.Y),
+                new((int)blue.X, (int)blue.Y)
+            };
+        });
+    }
+
+    /// <summary>Persists the three HSV input fields clicked in order H, S, V and makes HSV the active picker.</summary>
+    public static void SaveHsvCalibration(Vector2 hue, Vector2 saturation, Vector2 value)
+    {
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Circle";
+            c.PickerType = "HSV";
+            c.HsvCoordinates = new List<ScreenPoint>
+            {
+                new((int)hue.X, (int)hue.Y),
+                new((int)saturation.X, (int)saturation.Y),
+                new((int)value.X, (int)value.Y)
+            };
+        });
+    }
+
+    /// <summary>Persists the single hex input field and makes HEX the active picker.</summary>
+    public static void SaveHexCalibration(Vector2 field)
+    {
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Circle";
+            c.PickerType = "HEX";
+            c.HexCoordinate = new ScreenPoint((int)field.X, (int)field.Y);
+        });
+    }
+
+    /// <summary>Persists the whole color box in one capture: hue slider start/end, then box top-left/bottom-right.</summary>
+    public static void SaveBoxFullCalibration(Vector2 hueStart, Vector2 hueEnd, Vector2 topLeft, Vector2 bottomRight)
+    {
+        UpdateConfig(c =>
+        {
+            c.ColorPickingMethod = "Box";
+            c.PickerType = "Box";
+            c.BoxHueStart = new ScreenPoint((int)hueStart.X, (int)hueStart.Y);
+            c.BoxHueEnd = new ScreenPoint((int)hueEnd.X, (int)hueEnd.Y);
+            c.BoxTopLeft = new ScreenPoint((int)topLeft.X, (int)topLeft.Y);
+            c.BoxBottomRight = new ScreenPoint((int)bottomRight.X, (int)bottomRight.Y);
+        });
+    }
+
+    /// <summary>True when the configured picker type has every coordinate it needs to select a color.</summary>
+    public static bool ConfiguredTypeIsReady()
+    {
+        var config = DdConfigService.Current;
+        return config.PickerType switch
+        {
+            _ when config.IsPaletteMatchPicker => config.PaletteSlots.Count > 0,
+            _ when config.PickerType.Equals("RGB", StringComparison.OrdinalIgnoreCase) => config.RgbCoordinates.Count == 3,
+            _ when config.PickerType.Equals("HEX", StringComparison.OrdinalIgnoreCase) => config.HexCoordinate is not null,
+            _ when config.PickerType.Equals("HSV", StringComparison.OrdinalIgnoreCase) => config.HsvCoordinates.Count == 3,
+            _ when config.PickerType.Equals("Wheel", StringComparison.OrdinalIgnoreCase) =>
+                config.WheelCenter is not null && config.WheelEdge is not null && config.WheelDark is not null && config.WheelBright is not null,
+            _ when config.PickerType.Equals("Box", StringComparison.OrdinalIgnoreCase) =>
+                config.BoxHueStart is not null && config.BoxHueEnd is not null && config.BoxTopLeft is not null && config.BoxBottomRight is not null,
+            _ => false
+        };
+    }
+
+    /// <summary>True when a draw can select colors right now: configured picker calibrated,
+    /// or a legacy config.json wheel/slider calibration exists as fallback.</summary>
+    public static bool CanSelectCurrently => ConfiguredTypeIsReady() || IsCalibrated;
 
     private static void UpdateConfig(Action<AutoDrawConfig> update)
     {

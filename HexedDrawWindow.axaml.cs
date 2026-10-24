@@ -28,6 +28,7 @@ public partial class HexedDrawWindow : Window
     private static readonly string[] LayerOrders = { "Brightness to darkness", "Largest area first", "Darkness to brightness" };
     private static readonly string[] StrayModes = { "Disabled", "Smart Merge (V5)" };
     private static readonly string[] DrawerModules = { "Old (No Bridge)", "New (A* Bridge)" };
+    private static readonly string[] PickerTypes = { "HEX", "RGB", "HSV", "Wheel", "Box" };
 
     private readonly ObservableCollection<ImageSearchResult> _searchResults = new();
     private readonly DispatcherTimer _autoQuantizeTimer;
@@ -232,15 +233,60 @@ public partial class HexedDrawWindow : Window
 
     // ---------------------------------------------------------------- settings tab
 
-    private void PickerStyle_OnChanged(object? sender, RoutedEventArgs e)
+    private void PickerType_OnChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_updating) return;
-        var box = BoxPickerRadio.IsChecked == true;
+        var index = Math.Clamp(PickerTypeCombo.SelectedIndex, 0, PickerTypes.Length - 1);
         var config = DdConfigService.Current;
-        config.ColorPickingMethod = box ? "Box" : "Circle";
-        config.PickerType = box ? "Box" : "Wheel";
+        config.PickerType = PickerTypes[index];
+        config.ColorPickingMethod = config.PickerType == "Box" ? "Box" : "Circle";
         ApplyConfig(config);
-        SetStatus(LocalizationManager.F("status_picker_set", box ? LocalizationManager.T("picker_style_box") : LocalizationManager.T("picker_style_circle")));
+        UpdatePickerStatus();
+        SetStatus(LocalizationManager.F("status_picker_set", PickerTypeLabel(config.PickerType)));
+    }
+
+    private static string PickerTypeLabel(string pickerType) => pickerType.ToLowerInvariant() switch
+    {
+        "hex" => LocalizationManager.T("picker_style_hex"),
+        "rgb" => LocalizationManager.T("picker_style_rgb"),
+        "hsv" => LocalizationManager.T("picker_style_hsv"),
+        "box" => LocalizationManager.T("picker_style_box"),
+        _ => LocalizationManager.T("picker_style_circle")
+    };
+
+    /// <summary>Plain-language summary of what is calibrated for the active picker type.</summary>
+    private void UpdatePickerStatus()
+    {
+        var config = DdConfigService.Current;
+        string detail;
+        if (config.PickerType.Equals("RGB", StringComparison.OrdinalIgnoreCase))
+            detail = config.RgbCoordinates.Count == 3
+                ? string.Join(", ", config.RgbCoordinates.Select(p => $"({p.X}, {p.Y})"))
+                : LocalizationManager.T("calib_none");
+        else if (config.PickerType.Equals("HSV", StringComparison.OrdinalIgnoreCase))
+            detail = config.HsvCoordinates.Count == 3
+                ? string.Join(", ", config.HsvCoordinates.Select(p => $"({p.X}, {p.Y})"))
+                : LocalizationManager.T("calib_none");
+        else if (config.PickerType.Equals("HEX", StringComparison.OrdinalIgnoreCase))
+            detail = config.HexCoordinate is { } hex ? $"({hex.X}, {hex.Y})" : LocalizationManager.T("calib_none");
+        else if (config.PickerType.Equals("Box", StringComparison.OrdinalIgnoreCase))
+            detail = config.BoxTopLeft is { } tl && config.BoxBottomRight is { } br
+                ? $"({tl.X}, {tl.Y}) → ({br.X}, {br.Y})"
+                : LocalizationManager.T("calib_none");
+        else if (config.IsPaletteMatchPicker)
+            detail = $"{config.PaletteSlots.Count} {LocalizationManager.T("calib_slots_count")}";
+        else
+            detail = config.WheelCenter is { } center && config.WheelEdge is { } edge &&
+                     config.WheelDark is not null && config.WheelBright is not null
+                ? $"({center.X}, {center.Y}) → ({edge.X}, {edge.Y})"
+                : LocalizationManager.T("calib_none");
+
+        var ready = ColorPicker.ConfiguredTypeIsReady();
+        var state = ready ? LocalizationManager.T("calib_set") : LocalizationManager.T("calib_not_set");
+        PickerStatusText.Text = $"{PickerTypeLabel(config.PickerType)} — {state}: {detail}";
+        PickerStatusText.Foreground = ready
+            ? Avalonia.Media.SolidColorBrush.Parse("#7BC47F")
+            : Avalonia.Media.SolidColorBrush.Parse("#C9A15F");
     }
 
     private void Mode_OnChanged(object? sender, RoutedEventArgs e)
@@ -635,8 +681,10 @@ public partial class HexedDrawWindow : Window
         BrushSizeInput.Text = config.BrushSize.ToString(CultureInfo.InvariantCulture);
         DrawDelayInput.Text = (config.DrawDelaySeconds ?? config.Interval / 10_000_000d).ToString("0.######", CultureInfo.InvariantCulture);
 
-        CirclePickerRadio.IsChecked = !config.ColorPickingMethod.Equals("Box", StringComparison.OrdinalIgnoreCase);
-        BoxPickerRadio.IsChecked = config.ColorPickingMethod.Equals("Box", StringComparison.OrdinalIgnoreCase);
+        PickerTypeCombo.ItemsSource = PickerTypes.Select(PickerTypeLabel).ToArray();
+        PickerTypeCombo.SelectedIndex = Math.Max(0, Array.FindIndex(PickerTypes,
+            type => type.Equals(config.PickerType, StringComparison.OrdinalIgnoreCase)));
+        UpdatePickerStatus();
         ColorModeRadio.IsChecked = !config.Mode.Equals("bw", StringComparison.OrdinalIgnoreCase);
         BwModeRadio.IsChecked = config.Mode.Equals("bw", StringComparison.OrdinalIgnoreCase);
         AutoQuantizeCheck.IsChecked = config.AutoQuantize;
@@ -699,8 +747,12 @@ public partial class HexedDrawWindow : Window
         SearchQueryInput.Watermark = LocalizationManager.T("label_search");
 
         ColorPickerHeaderText.Text = LocalizationManager.T("lf_color_picker_style");
-        CirclePickerRadio.Content = LocalizationManager.T("picker_style_circle");
-        BoxPickerRadio.Content = LocalizationManager.T("picker_style_box");
+        PickerTypeLabel1.Text = LocalizationManager.T("picker_type_label");
+        PickerTypeCombo.ItemsSource = PickerTypes.Select(PickerTypeLabel).ToArray();
+        CalibrateHexButton.Content = LocalizationManager.T("set_hex");
+        CalibrateRgbButton.Content = LocalizationManager.T("set_rgb");
+        CalibrateHsvButton.Content = LocalizationManager.T("set_hsv");
+        FieldCalibrationHeaderText.Text = LocalizationManager.T("lf_calib_text");
         CircleCalibrationHeaderText.Text = LocalizationManager.T("lf_calib_circle");
         CalibrateCircleButton.Content = LocalizationManager.T("btn_calib_circle");
         CalibrateBrightnessButton.Content = LocalizationManager.T("btn_calib_slider");
@@ -708,6 +760,8 @@ public partial class HexedDrawWindow : Window
         BoxCalibrationHeaderText.Text = LocalizationManager.T("lf_calib_box");
         CalibrateHueButton.Content = LocalizationManager.T("btn_calib_rainbow");
         CalibrateBoxButton.Content = LocalizationManager.T("btn_calib_box");
+        CalibrateBoxAllButton.Content = LocalizationManager.T("btn_calib_boxall");
+        UpdatePickerStatus();
         ModeHeaderText.Text = LocalizationManager.T("lf_mode");
         ColorModeRadio.Content = LocalizationManager.T("mode_color");
         BwModeRadio.Content = LocalizationManager.T("mode_bw");

@@ -93,6 +93,13 @@ public partial class MainWindow : Window
     private Settings? _settings;
     private readonly List<Vector2> _colorPickerCalibrationPoints = new();
     private bool _capturingColorPicker;
+    private PickerCalibrationOverlay? _calibrationOverlay;
+    // Screen rect of the guide overlay, cached on the UI thread. The mouse hook runs on
+    // a background thread and must never read Avalonia visual properties itself.
+    private int _overlayLeft = int.MinValue;
+    private int _overlayTop = int.MinValue;
+    private int _overlayRight = int.MinValue;
+    private int _overlayBottom = int.MinValue;
 
     /// <summary>Which calibration scheme the next captured clicks belong to.</summary>
     private enum ColorPickerCalibrationMode
@@ -102,7 +109,11 @@ public partial class MainWindow : Window
         Circle,
         Brightness,
         BoxHue,
-        Box
+        Box,
+        BoxAll,
+        Rgb,
+        Hsv,
+        HexField
     }
 
     private ColorPickerCalibrationMode _calibrationMode = ColorPickerCalibrationMode.Wheel;
@@ -135,6 +146,7 @@ public partial class MainWindow : Window
         //new Onboarding(CurrentMainWindow);
         Config.init();
         LocalizationManager.Load(Config.GetEntry("userlang") ?? installedLanguage);
+        DdConfigService.AutoLoad();
         DdConfigService.Changed += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(ApplyDdConfigToUi);
         ApplyDdConfigToUi();
 
@@ -268,19 +280,28 @@ public partial class MainWindow : Window
         Drawing.Halt();
     }
 
-    /// <summary>
-    /// Listens for the calibration hotkeys on the global hook.
-    ///   F5 -> capture four points for the wheel color picker (center, rim, brightness top, brightness bottom).
-    ///   F7 -> capture six points for the slider color picker (min/max of the Hue, Saturation, and Value sliders).
-    /// HexedDrawer keeps F6 for Quantize and exposes the separated circle/brightness/box
-    /// calibrations through the Settings tab buttons.
+    /// <summary>Listens for the calibration hotkeys on the global hook.
+    ///   F5 -> capture the points the currently selected color picker type needs
+    ///         (Hex: 1, RGB: 3, HSV: 3, Box: 4, Wheel: 4).
+    ///   F7 -> capture six points for the HSV slider picker (min/max of Hue, Saturation, Value).
+    /// Separate part-calibrations for Circle / Brightness / Box hue / Box remain available
+    /// through the capture buttons in the Color Picker settings.
     /// </summary>
     private void ConfigureColorPicker(object? sender, KeyboardHookEventArgs e)
     {
         if (_capturingColorPicker) return;
         if (e.Data.KeyCode == KeyCode.VcF5)
         {
-            StartColorPickerCalibration(ColorPickerCalibrationMode.Wheel);
+            var pickerType = DdConfigService.Current.PickerType;
+            var mode = pickerType.ToLowerInvariant() switch
+            {
+                "hex" => ColorPickerCalibrationMode.HexField,
+                "rgb" => ColorPickerCalibrationMode.Rgb,
+                "hsv" => ColorPickerCalibrationMode.Hsv,
+                "box" => ColorPickerCalibrationMode.BoxAll,
+                _ => ColorPickerCalibrationMode.Wheel
+            };
+            StartColorPickerCalibration(mode);
         }
         else if (e.Data.KeyCode == KeyCode.VcF7)
         {
@@ -288,7 +309,7 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Starts a calibration capture programmatically (used by the HexedDrawer Settings tab).</summary>
+    /// <summary>Starts a calibration capture programmatically (used by the Color Picker capture buttons).</summary>
     public void BeginColorPickerCalibration(string mode)
     {
         if (_capturingColorPicker) return;
@@ -299,10 +320,76 @@ public partial class MainWindow : Window
             "Slider" => ColorPickerCalibrationMode.Slider,
             "BoxHue" => ColorPickerCalibrationMode.BoxHue,
             "Box" => ColorPickerCalibrationMode.Box,
+            "BoxAll" => ColorPickerCalibrationMode.BoxAll,
+            "Rgb" => ColorPickerCalibrationMode.Rgb,
+            "Hsv" => ColorPickerCalibrationMode.Hsv,
+            "Hex" or "HexField" => ColorPickerCalibrationMode.HexField,
             _ => ColorPickerCalibrationMode.Wheel
         };
         StartColorPickerCalibration(parsed);
     }
+
+    /// <summary>The click-by-click guidance for each calibration scheme, in capture order.</summary>
+    private static string[] CalibrationSteps(ColorPickerCalibrationMode mode) => mode switch
+    {
+        ColorPickerCalibrationMode.HexField => new[] { LocalizationManager.T("calib_step_hex") },
+        ColorPickerCalibrationMode.Rgb => new[]
+        {
+            LocalizationManager.T("calib_step_rgb_r"),
+            LocalizationManager.T("calib_step_rgb_g"),
+            LocalizationManager.T("calib_step_rgb_b")
+        },
+        ColorPickerCalibrationMode.Hsv => new[]
+        {
+            LocalizationManager.T("calib_step_hsv_h"),
+            LocalizationManager.T("calib_step_hsv_s"),
+            LocalizationManager.T("calib_step_hsv_v")
+        },
+        ColorPickerCalibrationMode.Wheel => new[]
+        {
+            LocalizationManager.T("calib_step_wheel_center"),
+            LocalizationManager.T("calib_step_wheel_rim"),
+            LocalizationManager.T("calib_step_wheel_bright"),
+            LocalizationManager.T("calib_step_wheel_dark")
+        },
+        ColorPickerCalibrationMode.BoxAll => new[]
+        {
+            LocalizationManager.T("calib_step_hue_start"),
+            LocalizationManager.T("calib_step_hue_end"),
+            LocalizationManager.T("calib_step_box_tl"),
+            LocalizationManager.T("calib_step_box_br")
+        },
+        ColorPickerCalibrationMode.BoxHue => new[]
+        {
+            LocalizationManager.T("calib_step_hue_start"),
+            LocalizationManager.T("calib_step_hue_end")
+        },
+        ColorPickerCalibrationMode.Box => new[]
+        {
+            LocalizationManager.T("calib_step_box_tl"),
+            LocalizationManager.T("calib_step_box_br")
+        },
+        ColorPickerCalibrationMode.Circle => new[]
+        {
+            LocalizationManager.T("calib_step_wheel_center"),
+            LocalizationManager.T("calib_step_wheel_rim")
+        },
+        ColorPickerCalibrationMode.Brightness => new[]
+        {
+            LocalizationManager.T("calib_step_wheel_dark"),
+            LocalizationManager.T("calib_step_wheel_bright")
+        },
+        ColorPickerCalibrationMode.Slider => new[]
+        {
+            LocalizationManager.T("calib_step_slider_hue_min"),
+            LocalizationManager.T("calib_step_slider_hue_max"),
+            LocalizationManager.T("calib_step_slider_sat_min"),
+            LocalizationManager.T("calib_step_slider_sat_max"),
+            LocalizationManager.T("calib_step_slider_val_min"),
+            LocalizationManager.T("calib_step_slider_val_max")
+        },
+        _ => new[] { string.Empty }
+    };
 
     private void StartColorPickerCalibration(ColorPickerCalibrationMode mode)
     {
@@ -310,46 +397,160 @@ public partial class MainWindow : Window
         _calibrationMode = mode;
         _colorPickerCalibrationPoints.Clear();
         Input.taskHook.MouseClicked += CaptureColorPickerPoint;
-        Avalonia.Threading.Dispatcher.UIThread.Invoke(() => WindowState = WindowState.Minimized);
+
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
+        {
+            _calibrationOverlay = new PickerCalibrationOverlay();
+            _calibrationOverlay.CancelRequested += CancelColorPickerCalibration;
+            _calibrationOverlay.Closed += (_, _) =>
+            {
+                _calibrationOverlay = null;
+                InvalidateOverlayBounds();
+            };
+            _calibrationOverlay.PositionChanged += (_, _) => CacheOverlayBounds();
+            _calibrationOverlay.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == BoundsProperty) CacheOverlayBounds();
+            };
+            // Show the first guidance step, then minimize so the target picker is visible.
+            _calibrationOverlay.ShowFor(0, CalibrationSteps(mode).Length, CalibrationStepText(0), LocalizationManager.T("calib_title"));
+            CacheOverlayBounds();
+            WindowState = WindowState.Minimized;
+            UpdateGuidanceStep(0);
+        });
+    }
+
+    private string CalibrationStepText(int completed)
+    {
+        var steps = CalibrationSteps(_calibrationMode);
+        return steps[Math.Min(completed, steps.Length - 1)];
+    }
+
+    /// <summary>True when the click happened inside the guide window itself (e.g. its Cancel button)
+    /// and therefore must not be counted as a calibration point. Reads only cached ints so it is
+    /// safe to call from the mouse-hook thread.</summary>
+    private bool IsClickInsideOverlay(Vector2 point)
+    {
+        if (_overlayRight <= _overlayLeft || _overlayBottom <= _overlayTop) return false;
+        return point.X >= _overlayLeft - 10 && point.Y >= _overlayTop - 10
+            && point.X <= _overlayRight + 10 && point.Y <= _overlayBottom + 10;
+    }
+
+    /// <summary>Refresh the cached overlay rect. UI thread only.</summary>
+    private void CacheOverlayBounds()
+    {
+        var overlay = _calibrationOverlay;
+        if (overlay is null)
+        {
+            InvalidateOverlayBounds();
+            return;
+        }
+
+        var position = overlay.Position;
+        var width = (int)Math.Ceiling(overlay.Bounds.Width);
+        var height = (int)Math.Ceiling(overlay.Bounds.Height);
+        if (width <= 0 || height <= 0)
+        {
+            // Layout has not completed yet; refresh once it has.
+            Dispatcher.UIThread.Post(CacheOverlayBounds, DispatcherPriority.Loaded);
+            return;
+        }
+
+        _overlayLeft = position.X;
+        _overlayTop = position.Y;
+        _overlayRight = position.X + width;
+        _overlayBottom = position.Y + height;
+    }
+
+    private void InvalidateOverlayBounds()
+    {
+        _overlayLeft = int.MinValue;
+        _overlayTop = int.MinValue;
+        _overlayRight = int.MinValue;
+        _overlayBottom = int.MinValue;
+    }
+
+    private static int RequiredCalibrationPoints(ColorPickerCalibrationMode mode) => mode switch
+    {
+        ColorPickerCalibrationMode.Wheel => 4,
+        ColorPickerCalibrationMode.Slider => 6,
+        ColorPickerCalibrationMode.BoxAll => 4,
+        ColorPickerCalibrationMode.Rgb => 3,
+        ColorPickerCalibrationMode.Hsv => 3,
+        ColorPickerCalibrationMode.HexField => 1,
+        _ => 2
+    };
+
+    private void UpdateGuidanceStep(int completed)
+    {
+        var overlay = _calibrationOverlay;
+        if (overlay is null) return;
+        var total = RequiredCalibrationPoints(_calibrationMode);
+        var next = completed >= total ? "..." : CalibrationStepText(completed);
+        overlay.SetStep(completed, total, next, LocalizationManager.T("calib_title"));
+        CacheOverlayBounds();
+    }
+
+    /// <summary>User pressed Cancel / ESC on the guide window: abort the capture without saving.</summary>
+    private void CancelColorPickerCalibration(object? sender, EventArgs e)
+    {
+        if (!_capturingColorPicker) return;
+        Input.taskHook.MouseClicked -= CaptureColorPickerPoint;
+        _capturingColorPicker = false;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        });
+        _calibrationOverlay?.Close();
+        _calibrationOverlay = null;
+        Utils.Log("Color picker calibration cancelled.");
     }
 
     private void CaptureColorPickerPoint(object? sender, MouseHookEventArgs e)
     {
         if (e.Data.Button != SharpHook.Native.MouseButton.Button1) return;
-        _colorPickerCalibrationPoints.Add(new Vector2(e.Data.X, e.Data.Y));
+        var clickPoint = new Vector2(e.Data.X, e.Data.Y);
+        if (IsClickInsideOverlay(clickPoint)) return;
+        _colorPickerCalibrationPoints.Add(clickPoint);
+        var completed = _colorPickerCalibrationPoints.Count;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => UpdateGuidanceStep(completed));
 
-        var requiredPoints = _calibrationMode switch
-        {
-            ColorPickerCalibrationMode.Wheel => 4,
-            ColorPickerCalibrationMode.Slider => 6,
-            _ => 2
-        };
+        var requiredPoints = RequiredCalibrationPoints(_calibrationMode);
         if (_colorPickerCalibrationPoints.Count < requiredPoints) return;
 
+        var points = _colorPickerCalibrationPoints.ToArray();
         switch (_calibrationMode)
         {
             case ColorPickerCalibrationMode.Wheel:
-                ColorPicker.SaveWheelCalibration(
-                    _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
-                    _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3]);
+                ColorPicker.SaveWheelCalibration(points[0], points[1], points[2], points[3]);
                 break;
             case ColorPickerCalibrationMode.Slider:
                 ColorPicker.SaveSliderCalibration(
-                    _colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1],
-                    _colorPickerCalibrationPoints[2], _colorPickerCalibrationPoints[3],
-                    _colorPickerCalibrationPoints[4], _colorPickerCalibrationPoints[5]);
+                    points[0], points[1], points[2], points[3], points[4], points[5]);
                 break;
             case ColorPickerCalibrationMode.Circle:
-                ColorPicker.SaveCircleCalibration(_colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1]);
+                ColorPicker.SaveCircleCalibration(points[0], points[1]);
                 break;
             case ColorPickerCalibrationMode.Brightness:
-                ColorPicker.SaveBrightnessCalibration(_colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1]);
+                ColorPicker.SaveBrightnessCalibration(points[0], points[1]);
                 break;
             case ColorPickerCalibrationMode.BoxHue:
-                SaveBoxHueCalibration(_colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1]);
+                SaveBoxHueCalibration(points[0], points[1]);
                 break;
             case ColorPickerCalibrationMode.Box:
-                SaveBoxCalibration(_colorPickerCalibrationPoints[0], _colorPickerCalibrationPoints[1]);
+                SaveBoxCalibration(points[0], points[1]);
+                break;
+            case ColorPickerCalibrationMode.BoxAll:
+                ColorPicker.SaveBoxFullCalibration(points[0], points[1], points[2], points[3]);
+                break;
+            case ColorPickerCalibrationMode.Rgb:
+                ColorPicker.SaveRgbCalibration(points[0], points[1], points[2]);
+                break;
+            case ColorPickerCalibrationMode.Hsv:
+                ColorPicker.SaveHsvCalibration(points[0], points[1], points[2]);
+                break;
+            case ColorPickerCalibrationMode.HexField:
+                ColorPicker.SaveHexCalibration(points[0]);
                 break;
         }
 
@@ -357,16 +558,22 @@ public partial class MainWindow : Window
         _capturingColorPicker = false;
         Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
         {
+            _calibrationOverlay?.Close();
+            _calibrationOverlay = null;
             WindowState = WindowState.Normal;
             UpdateColorPickerModeStatus();
             var message = _calibrationMode switch
             {
-                ColorPickerCalibrationMode.Wheel => "Wheel calibration saved. The Set Color Hex action will now select colors using the calibrated wheel.",
-                ColorPickerCalibrationMode.Slider => "Slider calibration saved. The Set Color Hex action will now drive the Hue, Saturation, and Value sliders in order.",
+                ColorPickerCalibrationMode.Wheel => "Wheel calibrated. Colors will now be selected on the calibrated wheel.",
+                ColorPickerCalibrationMode.Slider => "Sliders calibrated. Colors will now be driven through the Hue, Saturation, and Value sliders.",
                 ColorPickerCalibrationMode.Circle => "Color circle centre and rim saved.",
                 ColorPickerCalibrationMode.Brightness => "Brightness slider endpoints saved.",
                 ColorPickerCalibrationMode.BoxHue => "Color box hue slider endpoints saved.",
-                _ => "Color box corners saved."
+                ColorPickerCalibrationMode.Box => "Color box corners saved.",
+                ColorPickerCalibrationMode.BoxAll => "Color box calibrated (hue slider + color area).",
+                ColorPickerCalibrationMode.Rgb => "R, G, B fields saved. Layers will now be colored by typing their channels.",
+                ColorPickerCalibrationMode.Hsv => "H, S, V fields saved. Layers will now be colored by typing hue, saturation, and value.",
+                _ => "HEX field saved. Layers will now be colored by typing their hex code."
             };
             new MessageBox().ShowMessageBox("Color picker configured", message);
         });
@@ -394,13 +601,20 @@ public partial class MainWindow : Window
 
     private void UpdateColorPickerModeStatus()
     {
-        var mode = Config.GetEntry("ColorPickerMode");
-        ColorPickerModeLabel.Content = mode switch
+        var config = DdConfigService.Current;
+        var pickers = new (string Type, string Fallback)[]
         {
-            "Wheel" => "Color Picker: Wheel",
-            "Slider" => "Color Picker: Slider (press F6 to re-calibrate)",
-            _ => "Color Picker: Wheel (press F5 to calibrate)"
+            ("hex", "Color Picker: HEX field"),
+            ("rgb", "Color Picker: R, G, B fields"),
+            ("hsv", "Color Picker: H, S, V fields"),
+            ("box", "Color Picker: Color box"),
+            ("wheel", "Color Picker: Color wheel"),
+            ("palette", "Color Picker: Palette match")
         };
+        var label = pickers.FirstOrDefault(p => (config.PickerType ?? string.Empty).ToLowerInvariant().Contains(p.Type)).Fallback
+            ?? "Color Picker: Color wheel";
+        if (!ColorPicker.ConfiguredTypeIsReady()) label += " (press F5 to set up)";
+        ColorPickerModeLabel.Content = label;
     }
 
     private void ShowColorPickerHelp(object? sender, RoutedEventArgs e)
@@ -1012,6 +1226,7 @@ public partial class MainWindow : Window
         if (config.LockShape) { widthLock = config.CustomWidth; heightLock = config.CustomHeight; WidthInput.Text = config.CustomWidth.ToString(); HeightInput.Text = config.CustomHeight.ToString(); }
         if (config.CapturedPalette.Count > 0) HexColorsInput.Text = string.Join(", ", config.CapturedPalette);
         Drawing.LastPos = new Vector2(config.DrawRegion.Left, config.DrawRegion.Top);
+        UpdateColorPickerModeStatus();
     }
 
     /// <summary>Maps a persisted algorithm name onto the AlgorithmSelection ComboBox index.
